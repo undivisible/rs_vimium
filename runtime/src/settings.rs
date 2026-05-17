@@ -19,7 +19,7 @@ impl NewTabDestination {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_setting(s: &str) -> Self {
         match s {
             "browserNewTabPage" => NewTabDestination::BrowserNewTabPage,
             "customUrl" => NewTabDestination::CustomUrl,
@@ -60,6 +60,12 @@ pub fn default_settings() -> Value {
 pub struct UserSettings {
     pub settings: Value,
     pub defaults: Value,
+}
+
+impl Default for UserSettings {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl UserSettings {
@@ -128,7 +134,7 @@ impl UserSettings {
     }
 
     pub fn new_tab_destination(&self) -> NewTabDestination {
-        NewTabDestination::from_str(&self.get_str("newTabDestination"))
+        NewTabDestination::from_setting(&self.get_str("newTabDestination"))
     }
 
     pub fn new_tab_url(&self) -> String {

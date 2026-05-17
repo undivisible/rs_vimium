@@ -70,23 +70,13 @@ pub fn handle_key(
     let resolved = registry.resolve_command(&sequence, user_mappings);
 
     if let Some((cmd_name, entry)) = resolved {
-        if !is_prefix {
-            let effect = command_effect(cmd_name, count, entry);
-            let effect_mode = effect_mode(&effect);
-            json!({
-                "state": { "mode": effect_mode, "sequence": "", "countText": "", "input": "" },
-                "effect": effect,
-                "prevent": true
-            })
-        } else {
-            let effect = command_effect(cmd_name, count, entry);
-            let effect_mode = effect_mode(&effect);
-            json!({
-                "state": { "mode": effect_mode, "sequence": "", "countText": "", "input": "" },
-                "effect": effect,
-                "prevent": true
-            })
-        }
+        let effect = command_effect(cmd_name, count, entry);
+        let effect_mode = effect_mode(&effect);
+        json!({
+            "state": { "mode": effect_mode, "sequence": "", "countText": "", "input": "" },
+            "effect": effect,
+            "prevent": true
+        })
     } else if is_prefix {
         json!({
             "state": { "mode": "normal", "sequence": sequence, "countText": count_text, "input": "" },
@@ -162,8 +152,8 @@ fn state_to_val(state: &KeyState) -> Value {
 }
 
 pub fn command_effect(cmd_name: &str, count: i64, entry: Option<&CommandEntry>) -> Value {
-    let bkg = entry.map_or(false, |e| e.background);
-    let no_repeat = entry.map_or(false, |e| e.no_repeat);
+    let bkg = entry.is_some_and(|e| e.background);
+    let no_repeat = entry.is_some_and(|e| e.no_repeat);
     let count = if no_repeat { 1 } else { count };
 
     match cmd_name {

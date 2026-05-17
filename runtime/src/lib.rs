@@ -7,7 +7,7 @@ pub mod vomnibar;
 use commands::KeyMapRegistry;
 use crepuscularity_core::context::{TemplateContext, TemplateValue};
 use crepuscularity_web::render_component_file_to_html;
-use crepuscularity_webext::wasm::storage;
+use crepuscularity_webext::wasm::{runtime as browser_runtime, storage};
 use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use settings::UserSettings;
@@ -154,21 +154,30 @@ pub async fn settings_seed() -> Result<JsValue, JsValue> {
         .get_json(json!({"enabled": true}))
         .await
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    if let Ok(mut s) = USER_SETTINGS.lock() {
+    let pruned = if let Ok(mut s) = USER_SETTINGS.lock() {
         s.merge(stored);
-
-        {
-            let mut mappings = USER_MAPPINGS.lock().unwrap();
+        let pruned = settings::prune_defaults(&s.settings);
+        if let Ok(mut mappings) = USER_MAPPINGS.lock() {
             *mappings = COMMAND_REGISTRY.parse_user_mappings(&s.get_str("keyMappings"));
         }
-
-        let pruned = settings::prune_defaults(&s.settings);
+        Some(pruned)
+    } else {
+        None
+    };
+    if let Some(pruned) = pruned {
         storage::sync()
             .set(&pruned)
             .await
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
     }
     to_js(json!({"ok": true}))
+}
+
+#[wasm_bindgen]
+pub async fn send_runtime_message(message: JsValue) -> Result<JsValue, JsValue> {
+    browser_runtime::send_message_value(message)
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[wasm_bindgen]
@@ -341,34 +350,30 @@ pub async fn handle_background_message(message: JsValue) -> Result<JsValue, JsVa
     let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
 
     match msg_type {
-        "settings:get" => return settings_get().await,
+        "settings:get" => settings_get().await,
         "vimium-crepus" | "" => {
             let command = msg.get("command").and_then(Value::as_str).unwrap_or("");
             background::execute_background_command(command, &msg)
                 .await
                 .map_err(|e| JsValue::from_str(&e))?;
-            return to_js(json!({"ok": true}));
+            to_js(json!({"ok": true}))
         }
         _ => {
             let command = msg.get("handler").and_then(Value::as_str).unwrap_or("");
-            if !command.is_empty() {
-                match command {
-                    "runBackgroundCommand" => {
-                        let empty = json!({});
-                        let registry_entry = msg.get("registryEntry").unwrap_or(&empty);
-                        let cmd_name = registry_entry
-                            .get("command")
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
-                        background::execute_background_command(cmd_name, &msg)
-                            .await
-                            .map_err(|e| JsValue::from_str(&e))?;
-                        return to_js(json!({"ok": true}));
-                    }
-                    _ => {}
-                }
+            if command == "runBackgroundCommand" {
+                let empty = json!({});
+                let registry_entry = msg.get("registryEntry").unwrap_or(&empty);
+                let cmd_name = registry_entry
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                background::execute_background_command(cmd_name, &msg)
+                    .await
+                    .map_err(|e| JsValue::from_str(&e))?;
+                to_js(json!({"ok": true}))
+            } else {
+                to_js(json!({"ok": false, "error": format!("unknown message: {}", msg_type)}))
             }
-            return to_js(json!({"ok": false, "error": format!("unknown message: {}", msg_type)}));
         }
     }
 }

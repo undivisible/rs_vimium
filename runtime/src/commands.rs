@@ -822,6 +822,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
     ]
 }
 
+#[allow(clippy::too_many_arguments)]
 fn c(
     name: &str,
     desc: &str,
@@ -846,6 +847,7 @@ fn c(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ca(
     name: &str,
     desc: &str,
