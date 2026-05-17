@@ -33,17 +33,32 @@ api.runtime.onInstalled.addListener(({ reason, previousVersion }) => {
 });
 
 function injectContentScripts() {
+  const manifest = api.runtime.getManifest();
+  const scripts = manifest.content_scripts ?? [];
   api.tabs.query({}, (tabs) => {
     for (const tab of tabs) {
       if (!tab.url || !tab.url.startsWith("http")) continue;
-      api.scripting.executeScript({
-        target: { tabId: tab.id, allFrames: true },
-        files: ["src/content.js"]
-      }).catch(() => {});
-      api.scripting.insertCSS({
-        target: { tabId: tab.id, allFrames: true },
-        files: ["src/content.css"]
-      }).catch(() => {});
+      for (const script of scripts) {
+        if (script.js?.length) {
+          api.scripting.executeScript({
+            target: { tabId: tab.id, allFrames: script.all_frames === true },
+            files: script.js
+          }).catch(() => {});
+        }
+        if (script.css?.length) {
+          api.scripting.insertCSS({
+            target: { tabId: tab.id, allFrames: script.all_frames === true },
+            files: script.css
+          }).catch(() => {});
+        }
+      }
+      api.storage.sync.get({ userDefinedLinkHintCss: "" }, ({ userDefinedLinkHintCss }) => {
+        if (!userDefinedLinkHintCss) return;
+        api.scripting.insertCSS({
+          target: { tabId: tab.id, allFrames: true },
+          css: userDefinedLinkHintCss
+        }).catch(() => {});
+      });
     }
   });
 }

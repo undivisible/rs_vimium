@@ -2,6 +2,10 @@
 members = ["runtime"]
 resolver = "2"
 
+[workspace.package]
+license = "MPL-2.0"
+repository = "https://github.com/undivisible/rs_vimium"
+
 [workspace.dependencies]
 crepuscularity-core = { path = "../crepuscularity/crates/crepuscularity-core" }
 crepuscularity-web = { path = "../crepuscularity/crates/crepuscularity-web" }

@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 pub struct CommandEntry {
     pub name: String,
     pub desc: String,
+    pub details: Option<String>,
     pub group: String,
     pub advanced: bool,
     pub background: bool,
@@ -390,7 +391,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             None,
             json!({}),
         ),
-        ca(
+        cad(
             "Marks.activateCreateMode",
             "Create a new mark",
             "navigation",
@@ -399,7 +400,8 @@ pub fn all_commands() -> Vec<CommandEntry> {
             false,
             true,
             None,
-            json!({}),
+            Some("Do this by typing the key bound to this command, and then a letter. This will set a mark bound to that letter. Lowercase letters are local marks and uppercase letters are global marks."),
+            json!({"swap": "Swap global and local marks. This option exists because in a browser, global marks are generally more useful than local marks, and so it may be desirable to make lowercase letters represent global marks rather than local marks."}),
         ),
         ca(
             "Marks.activateGotoMode",
@@ -410,7 +412,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             false,
             true,
             None,
-            json!({}),
+            json!({"swap": "Swap global and local marks. This option exists because in a browser, global marks are generally more useful than local marks, and so it may be desirable to make lowercase letters represent global marks rather than local marks."}),
         ),
         c(
             "Vomnibar.activate",
@@ -421,7 +423,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             true,
             false,
             None,
-            json!({}),
+            json!({"query": "The text to prefill the Vomnibar with.", "keyword": "The keyword of a search engine defined in the \"Custom search engines\" section of the Vimium Options page. The Vomnibar will be scoped to use that search engine."}),
         ),
         c(
             "Vomnibar.activateInNewTab",
@@ -432,7 +434,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             true,
             false,
             None,
-            json!({}),
+            json!({"query": "The text to prefill the Vomnibar with.", "keyword": "The keyword of a search engine defined in the \"Custom search engines\" section of the Vimium Options page. The Vomnibar will be scoped to use that search engine."}),
         ),
         ca(
             "Vomnibar.activateBookmarks",
@@ -443,7 +445,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             true,
             false,
             None,
-            json!({}),
+            json!({"query": "The text to prefill the Vomnibar with."}),
         ),
         ca(
             "Vomnibar.activateBookmarksInNewTab",
@@ -454,7 +456,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             true,
             false,
             None,
-            json!({}),
+            json!({"query": "The text to prefill the Vomnibar with."}),
         ),
         ca(
             "Vomnibar.activateTabSelection",
@@ -575,7 +577,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             false,
             false,
             Some(20),
-            json!({"position": "Where to place the tab in the tab bar. One of `start`, `before`, `after`, `end`. `end` is the default.", "(any url)": "The URL to open in the new tab."}),
+            json!({"(any url)": "Open this URL, rather than the browser's new tab page. E.g.: `map X createTab https://example.com`", "window": "Create the tab in a new window", "incognito": "Create the tab in an incognito window", "position": "Where to place the tab in the tab bar. One of `start`, `before`, `after`, `end`. `after` is the default."}),
         ),
         c(
             "previousTab",
@@ -663,7 +665,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             false,
             true,
             None,
-            json!({}),
+            json!({"all": "Mute all tabs.", "other": "Mute every tab except the current one."}),
         ),
         c(
             "removeTab",
@@ -696,7 +698,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             false,
             false,
             None,
-            json!({}),
+            json!({"level": "The zoom level. This can be a range of [0.25, 5.0]. 1.0 is the default."}),
         ),
         ca(
             "closeTabsOnLeft",
@@ -837,6 +839,7 @@ fn c(
     CommandEntry {
         name: name.to_string(),
         desc: desc.to_string(),
+        details: None,
         group: group.to_string(),
         advanced,
         background,
@@ -845,6 +848,34 @@ fn c(
         repeat_limit,
         options,
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cd(
+    name: &str,
+    desc: &str,
+    group: &str,
+    advanced: bool,
+    background: bool,
+    top_frame: bool,
+    no_repeat: bool,
+    repeat_limit: Option<i64>,
+    details: Option<&str>,
+    options: Value,
+) -> CommandEntry {
+    let mut entry = c(
+        name,
+        desc,
+        group,
+        advanced,
+        background,
+        top_frame,
+        no_repeat,
+        repeat_limit,
+        options,
+    );
+    entry.details = details.map(ToString::to_string);
+    entry
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -868,6 +899,35 @@ fn ca(
         top_frame,
         no_repeat,
         repeat_limit,
+        options,
+    );
+    entry.advanced = advanced;
+    entry
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cad(
+    name: &str,
+    desc: &str,
+    group: &str,
+    advanced: bool,
+    background: bool,
+    top_frame: bool,
+    no_repeat: bool,
+    repeat_limit: Option<i64>,
+    details: Option<&str>,
+    options: Value,
+) -> CommandEntry {
+    let mut entry = cd(
+        name,
+        desc,
+        group,
+        advanced,
+        background,
+        top_frame,
+        no_repeat,
+        repeat_limit,
+        details,
         options,
     );
     entry.advanced = advanced;

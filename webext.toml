@@ -2,6 +2,8 @@
 name = "Vimium"
 version = "2.4.2"
 description = "The Hacker's Browser. Vimium provides keyboard shortcuts for navigation and control in the spirit of Vim."
+homepage = "https://github.com/undivisible/rs_vimium"
+minimum_chrome_version = "117.0"
 
 [capabilities]
 tabs = true
@@ -28,26 +30,33 @@ match_about_blank = true
 
 [[content_scripts]]
 matches = ["file:///", "file:///*/"]
-css = ["src/content.css"]
+css = ["src/file_urls.css"]
 run_at = "document_start"
 all_frames = true
 
 [options]
 icons = { "16" = "icons/icon16.png", "48" = "icons/icon48.png", "128" = "icons/icon128.png" }
+action_icons = { "16" = "icons/action_disabled_16.png", "32" = "icons/action_disabled_32.png" }
 options_page = "pages/options.html"
 action_popup = "pages/action.html"
 background_script = "src/background.js"
 extra_resources = ["_favicon/*"]
 
+[options.options_ui]
+page = "pages/options.html"
+browser_style = false
+open_in_tab = true
+
 [web_accessible_resources]
 resources = [
-    "pages/vomnibar_page.html",
-    "content_scripts/vimium.css",
-    "pages/hud_page.html",
-    "pages/help_dialog_page.html",
-    "pages/doc_search_completion.html",
-    "pages/command_listing.html",
     "resources/tlds.txt",
     "_favicon/*",
 ]
 matches = ["<all_urls>"]
+
+[commands._execute_action]
+description = "Open Vimium popup"
+
+[commands._execute_action.suggested_key]
+default = "Alt+Shift+V"
+mac = "Alt+Shift+V"

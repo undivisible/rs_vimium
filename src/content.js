@@ -1,4 +1,7 @@
 (async () => {
+  if (globalThis.__rsVimiumLoaded) return;
+  globalThis.__rsVimiumLoaded = true;
+
   const runtimeApi = globalThis.browser?.runtime ?? globalThis.chrome?.runtime;
   const runtime = await import(runtimeApi.getURL("vendor/runtime.js"));
   const wasmBytes = await fetch(runtimeApi.getURL("vendor/runtime_bg.wasm")).then((r) => r.arrayBuffer());

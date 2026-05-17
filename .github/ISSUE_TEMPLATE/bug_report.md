@@ -19,10 +19,10 @@ Steps to reproduce the behavior:
 
 Include a screenshot if applicable.
 
-**Browser and Vimium version**
+**Browser and rs_vimium version**
 
 If you're using Chrome, include the Chrome and OS version found at chrome://version. Also include
-the Vimium version found at chrome://extensions.
+the rs_vimium version found at chrome://extensions.
 
 If you're using Firefox, report the Firefox and OS version found at about:support. Also include the
-Vimium version found at about:addons.
+rs_vimium version found at about:addons.

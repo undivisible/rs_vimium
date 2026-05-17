@@ -105,6 +105,7 @@ fn shortcut_groups_json_val() -> Value {
             let item = json!({
                 "keys": command_keys_for_name(&cmd.name),
                 "label": cmd.desc,
+                "details": cmd.details,
                 "command": cmd.name,
                 "advanced": cmd.advanced
             });
