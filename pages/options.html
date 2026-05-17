@@ -1,282 +1,115 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
   <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Vimium Options</title>
-    <meta charset="UTF-8">
-    <meta name="color-scheme" content="light dark">
-    <link rel="stylesheet" type="text/css" href="options.css">
-    <link rel="stylesheet" type="text/css" href="../content_scripts/vimium.css" />
-    <script src="options.js" type="module"></script>
+    <style>
+      body{margin:0;background:#111315;color:#f5f0e6;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+      #root{max-width:760px;margin:0 auto;padding:24px 20px}
+      h1{font-size:22px;font-weight:800;margin:0 0 8px}
+      p{font-size:13px;color:#8890a0;margin:0 0 12px}
+      .section{border:1px solid rgba(255,255,255,.08);border-radius:8px;background:rgba(255,255,255,.025);padding:18px;margin-bottom:16px}
+      .section-header{font-size:15px;font-weight:700;margin:0 0 12px;color:#c7b46a}
+      label{display:block;margin-bottom:10px;font-size:13px;color:#ccc}
+      label span{display:block;margin-bottom:4px;color:#8890a0;font-weight:500}
+      input[type="text"],input[type="number"],textarea,select{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.12);border-radius:6px;background:#0d0f10;color:#f5f0e6;font:13px/1.4 Inter,ui-sans-serif,system-ui,sans-serif;padding:8px 10px;outline:none}
+      input:focus,textarea:focus,select:focus{border-color:#f4d35e}
+      textarea{min-height:200px;font-family:"SFMono-Regular",Consolas,monospace;font-size:12px;resize:vertical}
+      .checkbox-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+      .checkbox-row label{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;cursor:pointer}
+      .checkbox-row input[type="checkbox"]{accent-color:#f4d35e;width:16px;height:16px}
+      .actions{display:flex;gap:10px;margin-top:20px}
+      button{border:0;border-radius:6px;font:700 14px/1 Inter,ui-sans-serif,system-ui,sans-serif;padding:10px 20px;cursor:pointer}
+      .btn-primary{background:#f4d35e;color:#15130b}
+      .btn-secondary{background:rgba(255,255,255,.08);color:#f5f0e6}
+      .status{font-size:13px;color:#8ebd6a;margin-top:12px}
+      .status.error{color:#e06c6c}
+    </style>
   </head>
-
-  <body class="vimium-body">
-    <div id="wrapper">
-      <header>Vimium Options</header>
-      <input type="hidden" name="settingsVersion" />
-
-      <div id="settings-grid-container">
-        <h2>Excluded URLs and keys</h2>
-        <div>
-          <div id="exclusion-scroll-box">
-            <table id="exclusion-rules">
-              <tr>
-                <td><span class="exclusion-header-text">Patterns</span></td>
-                <td><span class="exclusion-header-text">Keys to exclude</span></td>
-              </tr>
-            </table>
-          </div>
-          <button id="exclusion-add-button">Add rule</button>
-        </div>
-        <div class="example">
-          Disable Vimium on URLs.<br>
-          "Patterns" are URL regular expressions. <code>*</code> will match zero or more characters.
-          <br>
-          "Keys": Vimium will exclude these keys and pass them through to the page.
-        </div>
-
-        <h2>Custom key mappings</h2>
-        <textarea name="keyMappings" type="text" spellcheck="false"></textarea>
-        <div class="example">
-          Example syntax:<br>
-          <pre
-            id="exampleKeyMapping"
-          >
-map j scrollDown
-map z2 setZoom level=2
-unmap j
-unmapAll
-" this is a comment
-# this is also a comment</pre>
-          <a href="/pages/command_listing.html" target="_blank">See all available commands</a>.
-        </div>
-
-        <h2>Custom search engines</h2>
-        <textarea name="searchEngines" spellcheck="false"></textarea>
-        <div class="example">
-          Add search-engine shortcuts to the Vomnibar. Format:<br>
-          <pre>
-a: http://a.com/?q=%s
-b: http://b.com/?q=%s description
-" this is a comment
-# this is also a comment</pre>
-          %s is replaced with the search terms. <br>
-          For search completion, see <a href="doc_search_completion.html" target="_blank">here</a>.
-        </div>
-
-        <h2>New tab URL</h2>
-        <div id="new-tab-url-container">
-          <input
-            id="vimiumNewTabPage"
-            type="radio"
-            name="newTabDestination"
-            value="vimiumNewTabPage"
-          />
-          <label for="vimiumNewTabPage">Vimium blank new tab page</label>
-          <div id="openVomnibarContainer">
-            <input id="openVomnibarOnNewTabPage" type="checkbox" name="openVomnibarOnNewTabPage">
-            <label for="openVomnibarOnNewTabPage">Open the Vomnibar when the page loads</label>
-          </div>
-          <input
-            id="browserNewTabPage"
-            type="radio"
-            name="newTabDestination"
-            value="browserNewTabPage"
-          />
-          <label for="browserNewTabPage">Browser's default new tab page</label>
-          <input id="customUrl" type="radio" name="newTabDestination" value="customUrl" />
-          <label for="customUrl">Custom URL</label>
-          <input type="text" name="newTabCustomUrl" style="display: none" />
-        </div>
-        <div class="example">
-          The page to open when using Vimium's "create new tab" command. To have Vimium commands
-          work on <em>all</em> new tab pages opened by the browser, a separate Vimium new tab
-          extension is required. See the full details <a
-            href="https://github.com/philc/vimium/blob/master/README.md#how-to-allow-vimium-to-work-on-new-tab-pages"
-            target="_blank"
-          >here</a>.
-        </div>
-
-        <header>Advanced Options</header>
-
-        <h2>Scroll step size</h2>
-        <span>
-          <input name="scrollStepSize" type="number" />px
-        </span>
-        <div class="example">
-          The size for basic movements (usually j/k/h/l).
-        </div>
-
-        <div id="link-hint-characters-container">
-          <h2>Characters used for link hints</h2>
-          <div class="link-hint-characters-field">
-            <input name="linkHintCharacters" type="text" />
-            <div class="example reset-link"><a href="#">Reset</a></div>
-          </div>
-          <div class="example">
-            The characters placed next to each link after typing "f" to enter link-hint mode.
-          </div>
-        </div>
-
-        <div id="link-hint-numbers-container">
-          <h2>Numbers used for link hints</h2>
-          <div class="link-hint-characters-field">
-            <input name="linkHintNumbers" type="text" />
-            <div class="example reset-link"><a href="#">Reset</a></div>
-          </div>
-          <div class="example">
-            The characters placed next to each link after typing "f" to enter link-hint mode.
-          </div>
-        </div>
-
-        <div class="spacer"></div>
-
-        <label class="boolean-label">
-          <input name="smoothScroll" type="checkbox" />
-          Use smooth scrolling</label>
-        <div class="example"></div>
-
-        <h2></h2>
-        <label class="boolean-label">
-          <input name="filterLinkHints" type="checkbox" />
-          Use the link's name and characters for link-hint filtering
+  <body>
+    <div id="root">
+      <h1>Vimium</h1>
+      <p>Keyboard shortcuts for navigation and control in the spirit of Vim.</p>
+      <div class="section">
+        <div class="section-header">Key Mappings</div>
+        <p>One mapping per line: <code>map keySequence commandName</code>. Lines starting with # are comments.</p>
+        <label>
+          <span>Custom key mappings:</span>
+          <textarea id="keyMappings" rows="12"></textarea>
         </label>
-        <div class="example">
-          In link-hint mode, this option lets you select a link by typing its text.
-        </div>
-
-        <div id="wait-for-enter">
-          <h2></h2>
-          <label class="boolean-label">
-            <input name="waitForEnterForFilteredHints" type="checkbox" />
-            Require <tt>Enter</tt> when filtering hints
-          </label>
-          <div class="example">
-            You activate the link with <tt>Enter</tt>, <em>always</em>; so you never accidentally
-            type Vimium commands.
-          </div>
-        </div>
-
-        <h2></h2>
-        <label class="boolean-label">
-          <input name="grabBackFocus" type="checkbox" />
-          Don't let pages steal the focus on load
+      </div>
+      <div class="section">
+        <div class="section-header">Scrolling</div>
+        <label>
+          <span>Scroll step size (px)</span>
+          <input type="number" id="scrollStepSize" min="10" max="500" step="10">
         </label>
-        <div class="example">
-          Prevent pages from focusing an input on load (e.g. Google, Bing, etc.).
-        </div>
-
-        <h2></h2>
-        <label class="boolean-label">
-          <input name="hideHud" type="checkbox" />
-          Hide the Heads Up Display (HUD) in insert mode
-        </label>
-        <div class="example">
-          When enabled, the HUD will not be displayed in insert mode.
-        </div>
-
-        <h2></h2>
-        <label class="boolean-label">
-          <input name="hideUpdateNotifications" type="checkbox" />
-          Hide update notifications
-        </label>
-        <div class="example">
-          When enabled, "Vimium has been updated" notifications will not be shown.
-        </div>
-
-        <h2></h2>
-        <label class="boolean-label">
-          <input name="regexFindMode" type="checkbox" />
-          Treat find queries as JavaScript regular expressions
-        </label>
-        <div class="example">
-          Switch back to plain find mode by using the <code>\R</code> escape sequence.
-        </div>
-
-        <h2></h2>
-        <label class="boolean-label">
-          <input name="ignoreKeyboardLayout" type="checkbox" />
-          Ignore keyboard layout
-        </label>
-        <div class="example">
-          This forces the use of <code>en-US</code> QWERTY layout and can be helpful for non-Latin
-          keyboards.
-        </div>
-
-        <h2>Previous patterns</h2>
-        <div>
-          <input name="previousPatterns" type="text" />
-          <div class="example reset-link"><a href="#">Reset</a></div>
-        </div>
-        <div class="example">
-          The "navigate to previous page" command uses these patterns to find the link to follow.
-        </div>
-
-        <h2>Next patterns</h2>
-        <div>
-          <input name="nextPatterns" type="text" />
-          <div class="example reset-link"><a href="#">Reset</a></div>
-        </div>
-        <div class="example">
-          The "navigate to next page" command uses these patterns to find the link to follow.
-        </div>
-
-        <h2>CSS for Vimium UI</h2>
-        <div>
-          <textarea
-            name="userDefinedLinkHintCss"
-            class="code"
-            type="text"
-            spellcheck="false"
-          ></textarea>
-          <div class="example reset-link"><a href="#">Reset</a></div>
-        </div>
-        <div class="example">
-          These styles are applied to link hints, the Vomnibar, the help dialog, the exclusions
-          pop-up and the HUD.<br>
-          By default, this CSS is used to style the characters next to each link hint.<br>
-          <br>
-          These styles are used in addition to and take precedence over Vimium's default styles.
-        </div>
-
-        <header>Backup and Restore</header>
-
-        <h2>Backup</h2>
-        <a id="download-backup" download="vimium-options.json" href="#">Download backup</a>
-        <div class="example">Download a backup of your settings.</div>
-
-        <h2>Restore</h2>
-        <input id="upload-backup" type="file" accept=".json" />
-        <div class="example">
-          Choose a backup file to restore.
+        <div class="checkbox-row">
+          <label><input type="checkbox" id="smoothScroll"> Smooth scrolling</label>
         </div>
       </div>
-
-      <footer>
-        <div id="footer-content">
-          <div id="footer-help-text">
-            Type <strong>?</strong> to show the help dialog.
-            <br>
-            Type <strong id="shortcut-to-save-all"></strong> to save all options.
-          </div>
-          <div id="footer-save-options">
-            <button id="save" disabled="disabled">No changes</button>
-          </div>
+      <div class="section">
+        <div class="section-header">Link Hints</div>
+        <label>
+          <span>Hint characters</span>
+          <input type="text" id="linkHintCharacters" placeholder="sadfjklewcmpgh">
+        </label>
+        <div class="checkbox-row">
+          <label><input type="checkbox" id="filterLinkHints"> Filter hints by typing</label>
         </div>
-      </footer>
+        <div class="checkbox-row">
+          <label><input type="checkbox" id="waitForEnterForFilteredHints"> Wait for Enter when filtering</label>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-header">Search</div>
+        <label>
+          <span>Default search URL</span>
+          <input type="text" id="searchUrl" placeholder="https://www.google.com/search?q=">
+        </label>
+        <label>
+          <span>Custom search engines</span>
+          <textarea id="searchEngines" rows="8" style="min-height:120px"></textarea>
+        </label>
+      </div>
+      <div class="section">
+        <div class="section-header">New Tab</div>
+        <label>
+          <span>New tab destination</span>
+          <select id="newTabDestination">
+            <option value="browserNewTabPage">Browser new tab page</option>
+            <option value="vimiumNewTabPage">Vimium new tab page</option>
+            <option value="customUrl">Custom URL</option>
+          </select>
+        </label>
+        <label>
+          <span>Custom new tab URL</span>
+          <input type="text" id="newTabCustomUrl" placeholder="https://...">
+        </label>
+      </div>
+      <div class="section">
+        <div class="section-header">Miscellaneous</div>
+        <div class="checkbox-row">
+          <label><input type="checkbox" id="hideHud"> Hide HUD (heads-up display)</label>
+        </div>
+        <div class="checkbox-row">
+          <label><input type="checkbox" id="grabBackFocus"> Grab back focus on page load</label>
+        </div>
+        <div class="checkbox-row">
+          <label><input type="checkbox" id="regexFindMode"> Use regex in find mode</label>
+        </div>
+        <div class="checkbox-row">
+          <label><input type="checkbox" id="helpDialog_showAdvancedCommands"> Show advanced commands in help</label>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn-primary" id="saveBtn">Save Settings</button>
+        <button class="btn-secondary" id="resetBtn">Reset to Defaults</button>
+        <button class="btn-secondary" id="exportBtn">Export Settings</button>
+      </div>
+      <div class="status" id="status"></div>
     </div>
-
-    <template id="exclusion-rule-template">
-      <tr class="rule">
-        <td>
-          <input type="text" name="pattern" spellcheck="false" placeholder="URL pattern" />
-        </td>
-        <td>
-          <input type="text" name="passKeys" spellcheck="false" placeholder="All" />
-        </td>
-        <td>
-          <input type="button" class="remove" value="&#x2716;" />
-        </td>
-      </tr>
-    </template>
+    <script type="module" src="../src/options.js"></script>
   </body>
 </html>
