@@ -1,0 +1,18 @@
+[package]
+name = "rs_vimium_runtime"
+version = "0.1.0"
+edition = "2021"
+description = "Rust runtime for rs_vimium"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+crepuscularity-core = { workspace = true }
+crepuscularity-web = { workspace = true }
+crepuscularity-webext = { workspace = true }
+once_cell = { workspace = true }
+serde_json = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
