@@ -18,16 +18,38 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
     match command {
         "create-tab" => {
             let settings = load_settings().await?;
-            let url = match settings.new_tab_destination() {
-                NewTabDestination::BrowserNewTabPage => None,
-                _ => Some(resolve_new_tab_url(&settings.new_tab_url())),
+            let options = command_options(_args);
+            let option_url = first_url_option(options);
+            let url = if let Some(url) = option_url {
+                Some(resolve_new_tab_url(&url))
+            } else {
+                match settings.new_tab_destination() {
+                    NewTabDestination::BrowserNewTabPage => None,
+                    _ => Some(resolve_new_tab_url(&settings.new_tab_url())),
+                }
             };
-            tabs::create(&tabs::CreateProperties {
-                url,
-                ..Default::default()
-            })
-            .await
-            .map_err(|e| e.to_string())?;
+            if option_bool(options, "window") || option_bool(options, "incognito") {
+                let _ = windows::create(&windows::CreateData {
+                    url: url.clone().map(Value::String),
+                    focused: Some(true),
+                    incognito: option_bool(options, "incognito").then_some(true),
+                    ..Default::default()
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+            let index = create_tab_index(options).await?;
+            let count = command_count(_args).min(20);
+            for offset in 0..count {
+                tabs::create(&tabs::CreateProperties {
+                    url: url.clone(),
+                    index: index.map(|index| index + offset),
+                    ..Default::default()
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+            }
         }
         "open-url" => {
             let url = _args
@@ -42,8 +64,8 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
             .await
             .map_err(|e| e.to_string())?;
         }
-        "previous-tab" => activate_relative_tab(-1).await?,
-        "next-tab" => activate_relative_tab(1).await?,
+        "previous-tab" => activate_relative_tab(-command_count(_args)).await?,
+        "next-tab" => activate_relative_tab(command_count(_args)).await?,
         "visit-previous-tab" => {
             let storage_data = storage::session()
                 .get_json(json!({"previousTabIds": []}))
@@ -66,9 +88,11 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
         "first-tab" => activate_edge_tab(false).await?,
         "last-tab" => activate_edge_tab(true).await?,
         "duplicate-tab" => {
-            if let Some(tab) = active_tab().await? {
-                if let Some(id) = tab.id {
-                    tabs::duplicate(id).await.map_err(|e| e.to_string())?;
+            for _ in 0..command_count(_args).min(20) {
+                if let Some(tab) = active_tab().await? {
+                    if let Some(id) = tab.id {
+                        tabs::duplicate(id).await.map_err(|e| e.to_string())?;
+                    }
                 }
             }
         }
@@ -124,15 +148,17 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
             }
         }
         "remove-tab" => {
-            if let Some(tab) = active_tab().await? {
-                if let Some(id) = tab.id {
-                    if let Some(url) = &tab.url {
-                        storage::sync()
-                            .set(&json!({ "lastClosedTabUrl": url }))
-                            .await
-                            .map_err(|e| format!("save url: {}", e))?;
+            for _ in 0..command_count(_args).min(25) {
+                if let Some(tab) = active_tab().await? {
+                    if let Some(id) = tab.id {
+                        if let Some(url) = &tab.url {
+                            storage::sync()
+                                .set(&json!({ "lastClosedTabUrl": url }))
+                                .await
+                                .map_err(|e| format!("save url: {}", e))?;
+                        }
+                        tabs::remove(id).await.map_err(|e| e.to_string())?;
                     }
-                    tabs::remove(id).await.map_err(|e| e.to_string())?;
                 }
             }
         }
@@ -143,13 +169,15 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
                 .map_err(|e| format!("get url: {}", e))?;
             if let Some(url) = saved.get("lastClosedTabUrl").and_then(Value::as_str) {
                 if !url.is_empty() {
-                    tabs::create(&tabs::CreateProperties {
-                        url: Some(url.to_string()),
-                        active: Some(true),
-                        ..Default::default()
-                    })
-                    .await
-                    .map_err(|e| e.to_string())?;
+                    for _ in 0..command_count(_args).min(20) {
+                        tabs::create(&tabs::CreateProperties {
+                            url: Some(url.to_string()),
+                            active: Some(true),
+                            ..Default::default()
+                        })
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    }
                 }
             }
         }
@@ -234,7 +262,7 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
             if let Some(tab) = active_tab().await? {
                 if let Some(id) = tab.id {
                     let current = tabs::get_zoom(id).await.unwrap_or(1.0);
-                    tabs::set_zoom(id, (current + 0.25).min(5.0))
+                    tabs::set_zoom(id, (current + 0.25 * command_count(_args) as f64).min(5.0))
                         .await
                         .map_err(|e| e.to_string())?;
                 }
@@ -244,7 +272,7 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
             if let Some(tab) = active_tab().await? {
                 if let Some(id) = tab.id {
                     let current = tabs::get_zoom(id).await.unwrap_or(1.0);
-                    tabs::set_zoom(id, (current - 0.25).max(0.25))
+                    tabs::set_zoom(id, (current - 0.25 * command_count(_args) as f64).max(0.25))
                         .await
                         .map_err(|e| e.to_string())?;
                 }
@@ -260,7 +288,10 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
         "set-zoom" => {
             if let Some(tab) = active_tab().await? {
                 if let Some(id) = tab.id {
-                    if let Some(level) = _args.get("level").and_then(Value::as_f64) {
+                    if let Some(level) = command_options(_args)
+                        .get("level")
+                        .and_then(|value| value.as_f64().or_else(|| value.as_str()?.parse().ok()))
+                    {
                         tabs::set_zoom(id, level.clamp(0.25, 5.0))
                             .await
                             .map_err(|e| e.to_string())?;
@@ -271,6 +302,9 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
         "reload" => {
             if let Some(tab) = active_tab().await? {
                 if let Some(id) = tab.id {
+                    let _hard = command_arg(_args, "hard")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
                     tabs::reload(id).await.map_err(|e| e.to_string())?;
                 }
             }
@@ -285,6 +319,59 @@ fn resolve_new_tab_url(url: &str) -> String {
         return url.to_string();
     }
     browser_runtime::get_url(url).unwrap_or_else(|_| url.to_string())
+}
+
+fn command_options(args: &Value) -> &Value {
+    args.get("options")
+        .or_else(|| args.get("args").and_then(|args| args.get("options")))
+        .unwrap_or(&Value::Null)
+}
+
+fn command_arg<'a>(args: &'a Value, key: &str) -> Option<&'a Value> {
+    args.get(key)
+        .or_else(|| args.get("args").and_then(|args| args.get(key)))
+}
+
+fn command_count(args: &Value) -> i64 {
+    command_arg(args, "count")
+        .and_then(Value::as_i64)
+        .unwrap_or(1)
+        .max(1)
+}
+
+fn option_bool(options: &Value, key: &str) -> bool {
+    options.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn first_url_option(options: &Value) -> Option<String> {
+    options.as_object()?.iter().find_map(|(key, value)| {
+        (value.as_bool() == Some(true) && (key.contains("://") || key.starts_with("about:")))
+            .then(|| key.to_string())
+    })
+}
+
+async fn create_tab_index(options: &Value) -> Result<Option<i64>, String> {
+    let Some(position) = options.get("position").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let Some(active) = active_tab().await? else {
+        return Ok(None);
+    };
+    let tabs = query_current_window().await?;
+    let active_index = active.index.unwrap_or(0);
+    let last_index = tabs
+        .iter()
+        .filter_map(|tab| tab.index)
+        .max()
+        .unwrap_or(active_index);
+    let index = match position {
+        "start" => 0,
+        "before" => active_index,
+        "after" => active_index + 1,
+        "end" => last_index + 1,
+        _ => return Ok(None),
+    };
+    Ok(Some(index))
 }
 
 async fn load_settings() -> Result<UserSettings, String> {

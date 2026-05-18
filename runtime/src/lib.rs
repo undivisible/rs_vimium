@@ -330,15 +330,25 @@ pub fn command_list() -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 pub fn hint_label(index: usize) -> String {
-    const CHARS: &[u8] = b"asdfghjklqwertyuiopzxcvbnm";
+    hint_label_with_chars(index, "asdfghjklqwertyuiopzxcvbnm")
+}
+
+pub fn hint_label_with_chars(index: usize, chars: &str) -> String {
+    let chars = chars
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<Vec<_>>();
+    if chars.is_empty() {
+        return String::new();
+    }
     let mut label = String::new();
     let mut value = index;
     loop {
-        label.insert(0, CHARS[value % CHARS.len()] as char);
-        if value < CHARS.len() {
+        label.insert(0, chars[value % chars.len()]);
+        if value < chars.len() {
             break;
         }
-        value = value / CHARS.len() - 1;
+        value = value / chars.len() - 1;
     }
     label
 }
@@ -409,6 +419,60 @@ pub async fn query_vomnibar(query: &str, mode: &str) -> Result<JsValue, JsValue>
 #[wasm_bindgen]
 pub fn key_name(event_key: &str) -> String {
     key_handler::key_name(event_key)
+}
+
+fn key_name_from_event(event: &KeyboardEvent) -> String {
+    let raw = key_handler::key_name(&event.key());
+    if raw.is_empty()
+        || matches!(
+            raw.as_str(),
+            "alt" | "control" | "meta" | "shift" | "altgraph"
+        )
+    {
+        return String::new();
+    }
+    let has_non_shift_modifier = event.alt_key() || event.ctrl_key() || event.meta_key();
+    let mut key = raw;
+    if key.chars().count() == 1 {
+        key = if event.shift_key() {
+            key.to_uppercase()
+        } else if has_non_shift_modifier {
+            key.to_lowercase()
+        } else {
+            key
+        };
+    }
+    let mut modifiers = Vec::new();
+    if event.alt_key() {
+        modifiers.push("a");
+    }
+    if event.ctrl_key() {
+        modifiers.push("c");
+    }
+    if event.meta_key() {
+        modifiers.push("m");
+    }
+    if event.shift_key() && key.chars().count() > 1 {
+        modifiers.push("s");
+    }
+    let combined = if modifiers.is_empty() {
+        key
+    } else {
+        let mut parts = modifiers
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        parts.push(key);
+        format!("<{}>", parts.join("-"))
+    };
+    CONTENT_STATE.with(|state| {
+        state
+            .borrow()
+            .mapped_keys
+            .get(&combined)
+            .cloned()
+            .unwrap_or(combined)
+    })
 }
 
 #[wasm_bindgen]
@@ -694,11 +758,14 @@ struct ContentDomState {
     key_state: key_handler::KeyState,
     hints: Vec<HintDom>,
     hint_input: String,
+    hint_action: String,
     last_find_query: String,
     find_matches: Vec<FindMatch>,
     find_active_index: usize,
     settings: Value,
+    mapped_keys: std::collections::HashMap<String, String>,
     activated_element: Option<Element>,
+    pass_next_key: bool,
     local_marks: std::collections::HashMap<String, Value>,
     mark_mode: Option<MarkMode>,
     visual_line_mode: bool,
@@ -1453,7 +1520,7 @@ fn toggle_view_source() {
     });
 }
 
-fn activate_hints() {
+fn activate_hints(action: &str) {
     clear_overlays();
     let Some(document) = doc() else {
         return;
@@ -1465,6 +1532,13 @@ fn activate_hints() {
     let scroll_x = win().and_then(|w| w.scroll_x().ok()).unwrap_or(0.0);
     let scroll_y = win().and_then(|w| w.scroll_y().ok()).unwrap_or(0.0);
     let mut hints = Vec::new();
+    let chars = setting_value(
+        "linkHintCharacters",
+        Value::String("sadfjklewcmpgh".to_string()),
+    )
+    .as_str()
+    .unwrap_or("sadfjklewcmpgh")
+    .to_string();
     for i in 0..nodes.length().min(600) {
         let Some(node) = nodes.item(i) else {
             continue;
@@ -1480,7 +1554,7 @@ fn activate_hints() {
             continue;
         };
         marker.set_class_name("vc-hint");
-        let label = hint_label(hints.len());
+        let label = hint_label_with_chars(hints.len(), &chars);
         set_text(&marker, &label);
         if let Some(style) = marker.dyn_ref::<HtmlElement>().map(|el| el.style()) {
             let _ = style.set_property("left", &format!("{}px", (rect.left() + scroll_x).max(2.0)));
@@ -1500,6 +1574,7 @@ fn activate_hints() {
         state.key_state.mode = "hints".to_string();
         state.hints = hints;
         state.hint_input.clear();
+        state.hint_action = action.to_string();
     });
 }
 
@@ -1528,18 +1603,55 @@ fn update_hints(key: &str) {
         }
         if remaining == 1 {
             if let Some(hint) = selected.and_then(|idx| state.hints.get(idx)) {
-                if let Some(el) = hint.target.dyn_ref::<HtmlElement>() {
-                    let _ = el.focus();
-                    el.click();
-                }
+                let target = hint.target.clone();
+                let action = state.hint_action.clone();
+                drop(state);
+                activate_hint_target(target, &action);
+                clear_hints();
             }
-            drop(state);
-            clear_hints();
         }
     });
 }
 
-fn show_vomnibar() {
+fn activate_hint_target(target: Element, action: &str) {
+    let href = target
+        .get_attribute("href")
+        .or_else(|| target.get_attribute("src"));
+    match action {
+        "new-tab" | "foreground-tab" | "queue" | "incognito" => {
+            if let Some(url) = href {
+                spawn_local(async move {
+                    send_open_url(url, true).await;
+                });
+            } else if let Some(el) = target.dyn_ref::<HtmlElement>() {
+                let _ = el.focus();
+                el.click();
+            }
+        }
+        "copy-url" => {
+            if let Some(url) = href {
+                spawn_local(async move {
+                    if let Some(promise) =
+                        clipboard_call("writeText", Some(JsValue::from_str(&url)))
+                    {
+                        let _ = JsFuture::from(promise).await;
+                        show_hud("Yanked link URL.");
+                    }
+                });
+            }
+        }
+        _ => {
+            if let Some(el) = target.dyn_ref::<HtmlElement>() {
+                let _ = el.focus();
+                el.click();
+            } else if let Some(url) = href {
+                set_location_href(&url);
+            }
+        }
+    }
+}
+
+fn show_vomnibar(mode: &str, new_tab: bool, prefill: String) {
     clear_overlays();
     let Some(document) = doc() else {
         return;
@@ -1548,15 +1660,217 @@ fn show_vomnibar() {
         return;
     };
     bar.set_class_name("vc-vomnibar");
-    bar.set_inner_html(r#"<div class="vc-vomnibar-box"><input class="vc-vomnibar-input" type="search" autocomplete="off" placeholder="Search bookmarks, history, and tabs"><ul class="vc-vomnibar-list"></ul></div>"#);
+    bar.set_inner_html(r#"<div class="vc-vomnibar-box"><input class="vc-vomnibar-input" type="search" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Search bookmarks, history, and tabs"><ul class="vc-vomnibar-list"></ul></div>"#);
     if let Some(root) = document.document_element() {
         append(&root, &bar);
     }
-    if let Ok(Some(input)) = bar.query_selector("input") {
-        if let Some(input) = input.dyn_ref::<HtmlElement>() {
-            let _ = input.focus();
+    let input = bar
+        .query_selector("input")
+        .ok()
+        .flatten()
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok());
+    let list = bar.query_selector("ul").ok().flatten();
+    let Some(input) = input else {
+        return;
+    };
+    let Some(list) = list else {
+        return;
+    };
+    input.set_value(&prefill);
+    let _ = input.focus();
+    if !prefill.is_empty() || mode != "full" {
+        refresh_vomnibar_list(input.value(), mode.to_string(), list.clone());
+    }
+    install_vomnibar_input(input, list, mode.to_string(), new_tab);
+}
+
+fn install_vomnibar_input(input: HtmlInputElement, list: Element, mode: String, new_tab: bool) {
+    let input_for_input = input.clone();
+    let list_for_input = list.clone();
+    let mode_for_input = mode.clone();
+    let input_closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_event| {
+        refresh_vomnibar_list(
+            input_for_input.value(),
+            mode_for_input.clone(),
+            list_for_input.clone(),
+        );
+    }));
+    let _ = input.add_event_listener_with_callback("input", input_closure.as_ref().unchecked_ref());
+    input_closure.forget();
+
+    let input_for_key = input.clone();
+    let list_for_key = list.clone();
+    let key_closure =
+        Closure::<dyn FnMut(KeyboardEvent)>::wrap(Box::new(move |event: KeyboardEvent| {
+            let key = key_name_from_event(&event);
+            match key.as_str() {
+                "Esc" => {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    clear_overlays();
+                }
+                "down" => {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    move_vomnibar_selection(&list_for_key, 1);
+                }
+                "up" => {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    move_vomnibar_selection(&list_for_key, -1);
+                }
+                "enter" => {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    let selected_url = selected_vomnibar_url(&list_for_key);
+                    let query = input_for_key.value();
+                    spawn_local(async move {
+                        let url = selected_url.or_else(|| {
+                            resolve_navigable(&query).ok().and_then(|value| {
+                                from_js(value)
+                                    .get("url")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_string)
+                            })
+                        });
+                        if let Some(url) = url {
+                            send_open_url(url, new_tab).await;
+                            clear_overlays();
+                        }
+                    });
+                }
+                _ => {}
+            }
+        }));
+    let _ = input.add_event_listener_with_callback("keydown", key_closure.as_ref().unchecked_ref());
+    key_closure.forget();
+
+    let list_for_click = list.clone();
+    let click_closure =
+        Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |event: web_sys::Event| {
+            let Some(item) = vomnibar_item_from_target(event.target()) else {
+                return;
+            };
+            let Some(url) = item.get_attribute("data-url") else {
+                return;
+            };
+            let _ = list_for_click.set_attribute("data-selected", "0");
+            event.prevent_default();
+            event.stop_propagation();
+            spawn_local(async move {
+                send_open_url(url, new_tab).await;
+                clear_overlays();
+            });
+        }));
+    let _ = list.add_event_listener_with_callback("click", click_closure.as_ref().unchecked_ref());
+    click_closure.forget();
+}
+
+fn refresh_vomnibar_list(query: String, mode: String, list: Element) {
+    spawn_local(async move {
+        if let Ok(result) = query_vomnibar(&query, &mode).await {
+            let value = from_js(result);
+            let items = value
+                .get("items")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            render_vomnibar_items(&list, &items);
+        }
+    });
+}
+
+fn render_vomnibar_items(list: &Element, items: &[Value]) {
+    let html = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let title = item.get("title").and_then(Value::as_str).unwrap_or("");
+            let url = item.get("url").and_then(Value::as_str).unwrap_or("");
+            let kind = item.get("kind").and_then(Value::as_str).unwrap_or("");
+            format!(
+                r#"<li class="vc-vomnibar-item{}" data-url="{}"><span class="vc-vomnibar-kind">{}</span><span class="vc-vomnibar-title">{}</span><span class="vc-vomnibar-url">{}</span></li>"#,
+                if index == 0 { " vc-vomnibar-selected" } else { "" },
+                html_attr(url),
+                html_text(kind),
+                html_text(title),
+                html_text(url)
+            )
+        })
+        .collect::<String>();
+    list.set_inner_html(&html);
+    let _ = list.set_attribute("data-selected", "0");
+}
+
+fn vomnibar_items(list: &Element) -> Option<web_sys::NodeList> {
+    list.query_selector_all(".vc-vomnibar-item").ok()
+}
+
+fn move_vomnibar_selection(list: &Element, delta: i32) {
+    let Some(items) = vomnibar_items(list) else {
+        return;
+    };
+    let len = items.length();
+    if len == 0 {
+        return;
+    }
+    let current = list
+        .get_attribute("data-selected")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(0);
+    let next = (current + delta).rem_euclid(len as i32);
+    set_vomnibar_selection(list, &items, next as u32);
+}
+
+fn set_vomnibar_selection(list: &Element, items: &web_sys::NodeList, selected: u32) {
+    for i in 0..items.length() {
+        if let Some(item) = items
+            .item(i)
+            .and_then(|node| node.dyn_into::<Element>().ok())
+        {
+            let _ = item
+                .class_list()
+                .toggle_with_force("vc-vomnibar-selected", i == selected);
+            if i == selected {
+                item.scroll_into_view();
+            }
         }
     }
+    let _ = list.set_attribute("data-selected", &selected.to_string());
+}
+
+fn selected_vomnibar_url(list: &Element) -> Option<String> {
+    let items = vomnibar_items(list)?;
+    let selected = list
+        .get_attribute("data-selected")
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0);
+    items
+        .item(selected)?
+        .dyn_into::<Element>()
+        .ok()?
+        .get_attribute("data-url")
+}
+
+fn vomnibar_item_from_target(target: Option<web_sys::EventTarget>) -> Option<Element> {
+    let mut element = target?.dyn_into::<Element>().ok();
+    while let Some(current) = element {
+        if current.class_list().contains("vc-vomnibar-item") {
+            return Some(current);
+        }
+        element = current.parent_element();
+    }
+    None
+}
+
+fn html_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn html_attr(text: &str) -> String {
+    html_text(text).replace('"', "&quot;")
 }
 
 fn show_find() {
@@ -1604,7 +1918,7 @@ fn show_find() {
 
             let key_closure =
                 Closure::<dyn FnMut(KeyboardEvent)>::wrap(Box::new(move |event: KeyboardEvent| {
-                    let key = key_handler::key_name(&event.key());
+                    let key = key_name_from_event(&event);
                     match key.as_str() {
                         "enter" => {
                             event.prevent_default();
@@ -2210,7 +2524,35 @@ fn apply_content_effect(effect: Value) {
         "clear-overlays" => clear_overlays(),
         "help" => show_help(),
         "hints" | "hints-general" | "hints-queue" | "hints-download" | "hints-incognito"
-        | "hints-copy-url" => activate_hints(),
+        | "hints-copy-url" => {
+            let action = match kind {
+                "hints" => {
+                    if effect
+                        .get("newTab")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        if effect
+                            .get("foreground")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false)
+                        {
+                            "foreground-tab"
+                        } else {
+                            "new-tab"
+                        }
+                    } else {
+                        "current"
+                    }
+                }
+                "hints-queue" => "queue",
+                "hints-incognito" => "incognito",
+                "hints-copy-url" => "copy-url",
+                "hints-download" => "download",
+                _ => "current",
+            };
+            activate_hints(action);
+        }
         "find" => show_find(),
         "find-next" => find_next(
             effect
@@ -2219,7 +2561,26 @@ fn apply_content_effect(effect: Value) {
                 .unwrap_or(false),
         ),
         "vomnibar" | "vomnibar-bookmarks" | "vomnibar-tabs" | "vomnibar-edit-url" => {
-            show_vomnibar()
+            let mode = match kind {
+                "vomnibar-bookmarks" => "bookmarks",
+                "vomnibar-tabs" => "tabs",
+                _ => "full",
+            };
+            let options = effect.get("options").unwrap_or(&Value::Null);
+            let prefill = options
+                .get("query")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| (kind == "vomnibar-edit-url").then(location_href).flatten())
+                .unwrap_or_default();
+            show_vomnibar(
+                mode,
+                effect
+                    .get("newTab")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                prefill,
+            );
         }
         "reload" => {
             if let Some(w) = win() {
@@ -2332,7 +2693,12 @@ fn apply_content_effect(effect: Value) {
                 .await;
             });
         }
-        "pass-next-key" => show_hud("Pass next key..."),
+        "pass-next-key" => {
+            CONTENT_STATE.with(|state| {
+                state.borrow_mut().pass_next_key = true;
+            });
+            show_hud("Pass next key...");
+        }
         _ => {}
     }
 }
@@ -2345,9 +2711,18 @@ fn refresh_content_settings() {
                 .get("settings")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
+            let mapped_keys = COMMAND_REGISTRY
+                .parse_effective_key_mappings(
+                    settings
+                        .get("keyMappings")
+                        .and_then(Value::as_str)
+                        .unwrap_or(""),
+                )
+                .key_to_mapped_key;
             CONTENT_STATE.with(|state| {
                 let mut state = state.borrow_mut();
                 state.settings = settings;
+                state.mapped_keys = mapped_keys;
                 state.enabled = true;
             });
         }
@@ -2408,7 +2783,19 @@ pub fn content_main() {
     }
     let closure = Closure::<dyn FnMut(KeyboardEvent)>::wrap(Box::new(
         move |event: KeyboardEvent| {
-            let key = key_handler::key_name(&event.key());
+            let key = key_name_from_event(&event);
+            if key.is_empty() {
+                return;
+            }
+            let pass_next = CONTENT_STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                let pass_next = state.pass_next_key;
+                state.pass_next_key = false;
+                pass_next
+            });
+            if pass_next {
+                return;
+            }
             let find_mode = CONTENT_STATE.with(|state| state.borrow().key_state.mode == "find");
             if find_mode {
                 if matches!(key.as_str(), "Esc" | "enter") {

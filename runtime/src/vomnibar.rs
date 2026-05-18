@@ -40,12 +40,13 @@ impl SearchEngines {
 }
 
 fn urlencode(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~' {
-                c.to_string()
+    s.bytes()
+        .map(|b| {
+            let ch = b as char;
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '~') {
+                ch.to_string()
             } else {
-                format!("%{:02X}", c as u8)
+                format!("%{b:02X}")
             }
         })
         .collect()

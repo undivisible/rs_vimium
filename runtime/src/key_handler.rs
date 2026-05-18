@@ -89,6 +89,17 @@ pub fn handle_key(
             "prevent": true
         })
     } else {
+        if !state.sequence.is_empty() {
+            if let Some((cmd_name, entry)) = registry.resolve_command(key, user_mappings) {
+                let effect = command_effect(cmd_name, 1, entry);
+                let effect_mode = effect_mode(&effect);
+                return json!({
+                    "state": { "mode": effect_mode, "sequence": "", "countText": "", "input": "" },
+                    "effect": effect,
+                    "prevent": true
+                });
+            }
+        }
         json!({
             "state": { "mode": "normal", "sequence": "", "countText": "", "input": "" },
             "effect": null,
@@ -200,6 +211,11 @@ pub fn background_command_for_registry_name(cmd_name: &str) -> Option<&'static s
 pub fn command_effect(cmd_name: &str, count: i64, entry: Option<&CommandEntry>) -> Value {
     let bkg = entry.is_some_and(|e| e.background);
     let no_repeat = entry.is_some_and(|e| e.no_repeat);
+    let count = entry
+        .and_then(|entry| entry.options.get("count"))
+        .and_then(Value::as_i64)
+        .map(|option_count| count.max(1) * option_count.max(1))
+        .unwrap_or(count);
     let count = if no_repeat { 1 } else { count };
 
     match cmd_name {
@@ -256,15 +272,25 @@ pub fn command_effect(cmd_name: &str, count: i64, entry: Option<&CommandEntry>) 
         "mainFrame" => json!({"kind": "focus-main-frame"}),
         "Marks.activateCreateMode" => json!({"kind": "create-mark"}),
         "Marks.activateGotoMode" => json!({"kind": "goto-mark"}),
-        "Vomnibar.activate" => json!({"kind": "vomnibar", "newTab": false}),
-        "Vomnibar.activateInNewTab" => json!({"kind": "vomnibar", "newTab": true}),
-        "Vomnibar.activateBookmarks" => json!({"kind": "vomnibar-bookmarks", "newTab": false}),
+        "Vomnibar.activate" => {
+            json!({"kind": "vomnibar", "newTab": false, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
+        }
+        "Vomnibar.activateInNewTab" => {
+            json!({"kind": "vomnibar", "newTab": true, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
+        }
+        "Vomnibar.activateBookmarks" => {
+            json!({"kind": "vomnibar-bookmarks", "newTab": false, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
+        }
         "Vomnibar.activateBookmarksInNewTab" => {
-            json!({"kind": "vomnibar-bookmarks", "newTab": true})
+            json!({"kind": "vomnibar-bookmarks", "newTab": true, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
         }
         "Vomnibar.activateTabSelection" => json!({"kind": "vomnibar-tabs"}),
-        "Vomnibar.activateEditUrl" => json!({"kind": "vomnibar-edit-url", "newTab": false}),
-        "Vomnibar.activateEditUrlInNewTab" => json!({"kind": "vomnibar-edit-url", "newTab": true}),
+        "Vomnibar.activateEditUrl" => {
+            json!({"kind": "vomnibar-edit-url", "newTab": false, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
+        }
+        "Vomnibar.activateEditUrlInNewTab" => {
+            json!({"kind": "vomnibar-edit-url", "newTab": true, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
+        }
         "enterFindMode" => json!({"kind": "find"}),
         "performFind" => json!({"kind": "find-next", "reverse": false}),
         "performBackwardsFind" => json!({"kind": "find-next", "reverse": true}),
@@ -276,7 +302,7 @@ pub fn command_effect(cmd_name: &str, count: i64, entry: Option<&CommandEntry>) 
         | "duplicateTab" | "togglePinTab" | "toggleMuteTab" | "removeTab" | "restoreTab"
         | "moveTabToNewWindow" | "closeTabsOnLeft" | "closeTabsOnRight" | "closeOtherTabs"
         | "moveTabLeft" | "moveTabRight" | "setZoom" | "zoomIn" | "zoomOut" | "zoomReset" => {
-            json!({"kind": "background", "command": background_command_for_registry_name(cmd_name)})
+            json!({"kind": "background", "command": background_command_for_registry_name(cmd_name), "count": count, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
         }
         "passNextKey" => json!({"kind": "pass-next-key"}),
         "toggleViewSource" => json!({"kind": "view-source"}),
@@ -400,6 +426,36 @@ mod tests {
         assert_eq!(
             command_effect("reload", 1, entry),
             json!({"kind": "background", "command": "reload", "hard": true})
+        );
+    }
+
+    #[test]
+    fn command_count_option_multiplies_typed_count() {
+        let registry = KeyMapRegistry::from_defaults();
+        let mappings = registry.parse_user_mappings("map q scrollDown count=5");
+        let entry = mappings.get("q").and_then(Option::as_ref);
+        assert_eq!(
+            command_effect("scrollDown", 2, entry),
+            json!({"kind": "scroll-step", "axis": "y", "direction": 1, "count": 10})
+        );
+    }
+
+    #[test]
+    fn prefix_fallback_runs_root_mapping_without_old_count() {
+        let registry = KeyMapRegistry::from_defaults();
+        let mappings = std::collections::HashMap::new();
+        let state = KeyState {
+            mode: "normal".to_string(),
+            sequence: "g".to_string(),
+            count_text: "7".to_string(),
+            input: String::new(),
+        };
+        assert_eq!(
+            handle_key(&state, "j", false, &registry, &mappings, "")
+                .get("effect")
+                .and_then(|effect| effect.get("count"))
+                .and_then(Value::as_i64),
+            Some(1)
         );
     }
 

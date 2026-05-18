@@ -698,7 +698,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             false,
             false,
             None,
-            json!({"level": "The zoom level. This can be a range of [0.25, 5.0]. 1.0 is the default."}),
+            json!({}),
         ),
         ca(
             "closeTabsOnLeft",
@@ -764,7 +764,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             false,
             false,
             None,
-            json!({}),
+            json!({"level": "The zoom level. This can be a range of [0.25, 5.0]. 1.0 is the default."}),
         ),
         ca(
             "zoomIn",
@@ -1116,9 +1116,6 @@ impl KeyMapRegistry {
         sequence: &str,
         user_mappings: &HashMap<String, Option<RegistryEntry>>,
     ) -> bool {
-        if user_mappings.get(sequence).is_some_and(Option::is_none) {
-            return false;
-        }
         for key in self.key_to_command.keys() {
             if key.starts_with(sequence) && key != sequence {
                 return true;
@@ -1698,6 +1695,20 @@ mod tests {
             Some("scrollDown"),
             registry
                 .resolve_command("aa", &mappings)
+                .map(|(name, _)| name)
+        );
+    }
+
+    #[test]
+    fn unmap_keeps_descendant_prefixes() {
+        let registry = KeyMapRegistry::from_defaults();
+        let mappings = registry.parse_user_mappings("unmap g");
+        assert!(registry.resolve_command("g", &mappings).is_none());
+        assert!(registry.is_prefix("g", &mappings));
+        assert_eq!(
+            Some("scrollToTop"),
+            registry
+                .resolve_command("gg", &mappings)
                 .map(|(name, _)| name)
         );
     }
