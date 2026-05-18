@@ -287,7 +287,7 @@ pub fn content_key(state_val: JsValue, key: &str, editable: bool) -> Result<JsVa
 pub fn render_help_overlay(show_advanced: bool) -> String {
     let groups = shortcut_groups_json_val();
     let mut html = String::from(
-        r#"<div class="vc-overlay-header"><span>vimium-crepus shortcuts</span><button class="vc-overlay-close" type="button">Esc</button></div><div class="vc-overlay-grid">"#,
+        r#"<div class="vc-overlay-header"><span>rs_vimium shortcuts</span><button class="vc-overlay-close" type="button">Esc</button></div><div class="vc-overlay-grid">"#,
     );
     for group in groups.as_array().into_iter().flatten() {
         let name = group.get("name").and_then(Value::as_str).unwrap_or("");
@@ -665,7 +665,7 @@ async fn send_mark_scroll(tab_id: i64, scroll_x: f64, scroll_y: f64) {
     let _ = tabs::send_message_value(
         tab_id,
         to_js(json!({
-            "type": "vimium-crepus",
+            "type": "rs_vimium",
             "command": "set-scroll-position",
             "scrollX": scroll_x,
             "scrollY": scroll_y,
@@ -682,7 +682,7 @@ pub async fn handle_background_message(message: JsValue) -> Result<JsValue, JsVa
 
     match msg_type {
         "settings:get" => settings_get().await,
-        "vimium-crepus" | "" => {
+        "rs_vimium" | "" => {
             let command = msg.get("command").and_then(Value::as_str).unwrap_or("");
             if command == "create-global-mark" {
                 create_global_mark_background(&msg)
@@ -705,7 +705,7 @@ pub async fn handle_background_message(message: JsValue) -> Result<JsValue, JsVa
                     let _ = tabs::send_message_value(
                         tab_id,
                         to_js(json!({
-                            "type": "vimium-crepus",
+                            "type": "rs_vimium",
                             "command": "focus-this-frame",
                             "topOnly": true,
                             "highlight": true,
@@ -1107,7 +1107,7 @@ fn create_global_mark(key: String) {
     let position = current_mark_position();
     spawn_local(async move {
         let msg = to_js(json!({
-            "type": "vimium-crepus",
+            "type": "rs_vimium",
             "command": "create-global-mark",
             "markName": key,
             "scrollX": position.get("scrollX").and_then(Value::as_f64).unwrap_or(0.0),
@@ -1125,7 +1125,7 @@ fn create_global_mark(key: String) {
 fn goto_global_mark(key: String) {
     spawn_local(async move {
         let msg = to_js(json!({
-            "type": "vimium-crepus",
+            "type": "rs_vimium",
             "command": "goto-global-mark",
             "markName": key,
         }))
@@ -1460,10 +1460,8 @@ fn follow_pattern(pattern: &str) {
 async fn send_open_url(url: String, new_tab: bool) {
     if new_tab {
         let _ = send_runtime_message(
-            to_js(
-                json!({"type":"vimium-crepus", "command": "open-url", "url": url, "active": true}),
-            )
-            .unwrap_or(JsValue::NULL),
+            to_js(json!({"type":"rs_vimium", "command": "open-url", "url": url, "active": true}))
+                .unwrap_or(JsValue::NULL),
         )
         .await;
     } else {
@@ -2688,7 +2686,7 @@ fn apply_content_effect(effect: Value) {
             } else {
                 spawn_local(async {
                     let _ = send_runtime_message(
-                        to_js(json!({"type":"vimium-crepus", "command": "focus-main-frame"}))
+                        to_js(json!({"type":"rs_vimium", "command": "focus-main-frame"}))
                             .unwrap_or(JsValue::NULL),
                     )
                     .await;
@@ -2704,7 +2702,7 @@ fn apply_content_effect(effect: Value) {
             let args = effect.clone();
             spawn_local(async move {
                 let _ = send_runtime_message(
-                    to_js(json!({"type":"vimium-crepus", "command": command, "args": args}))
+                    to_js(json!({"type":"rs_vimium", "command": command, "args": args}))
                         .unwrap_or(JsValue::NULL),
                 )
                 .await;
@@ -2760,7 +2758,7 @@ pub fn content_main() {
             refresh_content_settings();
             return;
         }
-        if msg.get("type").and_then(Value::as_str) == Some("vimium-crepus") {
+        if msg.get("type").and_then(Value::as_str) == Some("rs_vimium") {
             match msg.get("command").and_then(Value::as_str).unwrap_or("") {
                 "set-scroll-position" if is_top_frame() => {
                     set_previous_position();
