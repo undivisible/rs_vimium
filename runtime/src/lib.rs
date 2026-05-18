@@ -7,7 +7,7 @@ pub mod vomnibar;
 use commands::KeyMapRegistry;
 use crepuscularity_core::context::{TemplateContext, TemplateValue};
 use crepuscularity_web::render_component_file_to_html;
-use crepuscularity_webext::wasm::{runtime as browser_runtime, storage, tabs};
+use crepuscularity_webext::wasm::{runtime as browser_runtime, storage, tabs, EventListenerGuard};
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -439,3 +439,665 @@ body{margin:0;min-width:400px;font-family:Inter,ui-sans-serif,system-ui,-apple-s
 .vc-label{font-size:12px;color:#ddd7c9;line-height:1.35}
 .vc-footer{font-size:11px;line-height:1.4;color:#8d9483}
 "#;
+use std::cell::RefCell;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::spawn_local;
+use web_sys::{
+    Document, Element, HtmlElement, HtmlInputElement, HtmlTextAreaElement, KeyboardEvent, Window,
+};
+
+thread_local! {
+    static CONTENT_STATE: RefCell<ContentDomState> = RefCell::new(ContentDomState::default());
+    static EVENT_GUARDS: RefCell<Vec<EventListenerGuard>> = const { RefCell::new(Vec::new()) };
+}
+
+#[derive(Default)]
+struct ContentDomState {
+    enabled: bool,
+    key_state: key_handler::KeyState,
+    hints: Vec<HintDom>,
+    hint_input: String,
+    settings: Value,
+}
+
+struct HintDom {
+    label: String,
+    marker: Element,
+    target: Element,
+}
+
+fn win() -> Option<Window> {
+    web_sys::window()
+}
+
+fn doc() -> Option<Document> {
+    win()?.document()
+}
+
+fn is_editable_target(target: Option<web_sys::EventTarget>) -> bool {
+    let Some(target) = target else {
+        return false;
+    };
+    let Ok(element) = target.dyn_into::<Element>() else {
+        return false;
+    };
+    let tag = element.tag_name().to_lowercase();
+    element.has_attribute("contenteditable")
+        || matches!(tag.as_str(), "input" | "textarea" | "select")
+}
+
+fn setting_value(key: &str, fallback: Value) -> Value {
+    CONTENT_STATE.with(|state| {
+        state
+            .borrow()
+            .settings
+            .get(key)
+            .cloned()
+            .unwrap_or(fallback)
+    })
+}
+
+fn setting_bool(key: &str, fallback: bool) -> bool {
+    setting_value(key, Value::Bool(fallback))
+        .as_bool()
+        .unwrap_or(fallback)
+}
+
+fn clear_selector(selector: &str) {
+    let Some(document) = doc() else {
+        return;
+    };
+    if let Ok(nodes) = document.query_selector_all(selector) {
+        for i in 0..nodes.length() {
+            if let Some(node) = nodes.item(i) {
+                if let Some(parent) = node.parent_node() {
+                    let _ = parent.remove_child(&node);
+                }
+            }
+        }
+    }
+}
+
+fn clear_hints() {
+    CONTENT_STATE.with(|state| {
+        for hint in &state.borrow().hints {
+            hint.marker.remove();
+        }
+        let mut state = state.borrow_mut();
+        state.hints.clear();
+        state.hint_input.clear();
+        if state.key_state.mode == "hints" {
+            state.key_state.mode = "normal".to_string();
+        }
+    });
+}
+
+fn clear_overlays() {
+    clear_hints();
+    clear_selector(".vc-overlay,.vc-find,.vc-hint,.vc-vomnibar,.vc-hud");
+}
+
+fn set_text(el: &Element, text: &str) {
+    el.set_text_content(Some(text));
+}
+
+fn append(parent: &Element, child: &Element) {
+    let _ = parent.append_child(child);
+}
+
+fn show_help() {
+    clear_overlays();
+    let Some(document) = doc() else {
+        return;
+    };
+    let Ok(overlay) = document.create_element("section") else {
+        return;
+    };
+    overlay.set_class_name("vc-overlay");
+    overlay.set_inner_html(&render_help_overlay(setting_bool(
+        "helpDialog_showAdvancedCommands",
+        false,
+    )));
+    if let Some(root) = document.document_element() {
+        append(&root, &overlay);
+    }
+}
+
+fn show_hud(text: &str) {
+    clear_selector(".vc-hud");
+    let Some(document) = doc() else {
+        return;
+    };
+    let Ok(hud) = document.create_element("div") else {
+        return;
+    };
+    hud.set_class_name("vc-hud");
+    set_text(&hud, text);
+    if let Some(root) = document.document_element() {
+        append(&root, &hud);
+    }
+}
+
+fn visible(element: &Element) -> bool {
+    let rect = element.get_bounding_client_rect();
+    rect.width() > 0.0 && rect.height() > 0.0
+}
+
+fn activate_hints() {
+    clear_overlays();
+    let Some(document) = doc() else {
+        return;
+    };
+    let selector = "a[href],button,input:not([type='hidden']),textarea,select,summary,[role='button'],[onclick],[contenteditable='true'],[tabindex]:not([tabindex='-1'])";
+    let Ok(nodes) = document.query_selector_all(selector) else {
+        return;
+    };
+    let scroll_x = win().and_then(|w| w.scroll_x().ok()).unwrap_or(0.0);
+    let scroll_y = win().and_then(|w| w.scroll_y().ok()).unwrap_or(0.0);
+    let mut hints = Vec::new();
+    for i in 0..nodes.length().min(600) {
+        let Some(node) = nodes.item(i) else {
+            continue;
+        };
+        let Ok(target) = node.dyn_into::<Element>() else {
+            continue;
+        };
+        if !visible(&target) {
+            continue;
+        }
+        let rect = target.get_bounding_client_rect();
+        let Ok(marker) = document.create_element("span") else {
+            continue;
+        };
+        marker.set_class_name("vc-hint");
+        let label = hint_label(hints.len());
+        set_text(&marker, &label);
+        if let Some(style) = marker.dyn_ref::<HtmlElement>().map(|el| el.style()) {
+            let _ = style.set_property("left", &format!("{}px", (rect.left() + scroll_x).max(2.0)));
+            let _ = style.set_property("top", &format!("{}px", (rect.top() + scroll_y).max(2.0)));
+        }
+        if let Some(root) = document.document_element() {
+            append(&root, &marker);
+        }
+        hints.push(HintDom {
+            label,
+            marker,
+            target,
+        });
+    }
+    CONTENT_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.key_state.mode = "hints".to_string();
+        state.hints = hints;
+        state.hint_input.clear();
+    });
+}
+
+fn update_hints(key: &str) {
+    let labels = CONTENT_STATE.with(|state| {
+        state
+            .borrow()
+            .hints
+            .iter()
+            .map(|hint| hint.label.clone())
+            .collect::<Vec<_>>()
+    });
+    let Ok(labels_js) = to_js(json!(labels)) else {
+        return;
+    };
+    let current = CONTENT_STATE.with(|state| state.borrow().hint_input.clone());
+    let Ok(next_js) = update_hint_state(labels_js, &current, key) else {
+        return;
+    };
+    let next = from_js(next_js);
+    CONTENT_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.hint_input = next
+            .get("input")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if let Some(dim) = next.get("dim").and_then(Value::as_array) {
+            for (i, item) in dim.iter().enumerate() {
+                if let Some(hint) = state.hints.get(i) {
+                    let _ = hint
+                        .marker
+                        .class_list()
+                        .toggle_with_force("vc-hint-dim", item.as_bool().unwrap_or(false));
+                }
+            }
+        }
+        if let Some(selected) = next
+            .get("selected")
+            .and_then(Value::as_u64)
+            .map(|v| v as usize)
+        {
+            if let Some(hint) = state.hints.get(selected) {
+                if let Some(el) = hint.target.dyn_ref::<HtmlElement>() {
+                    el.click();
+                }
+            }
+            drop(state);
+            clear_hints();
+        }
+    });
+}
+
+fn show_vomnibar() {
+    clear_overlays();
+    let Some(document) = doc() else {
+        return;
+    };
+    let Ok(bar) = document.create_element("div") else {
+        return;
+    };
+    bar.set_class_name("vc-vomnibar");
+    bar.set_inner_html(r#"<div class="vc-vomnibar-box"><input class="vc-vomnibar-input" type="search" autocomplete="off" placeholder="Search bookmarks, history, and tabs"><ul class="vc-vomnibar-list"></ul></div>"#);
+    if let Some(root) = document.document_element() {
+        append(&root, &bar);
+    }
+    if let Ok(Some(input)) = bar.query_selector("input") {
+        if let Some(input) = input.dyn_ref::<HtmlElement>() {
+            let _ = input.focus();
+        }
+    }
+}
+
+fn show_find() {
+    clear_overlays();
+    let Some(document) = doc() else {
+        return;
+    };
+    let Ok(form) = document.create_element("form") else {
+        return;
+    };
+    form.set_class_name("vc-find");
+    form.set_inner_html(r#"<input type="search" autocomplete="off" class="vc-find-input"><button type="submit" class="vc-find-btn">Find</button>"#);
+    if let Some(root) = document.document_element() {
+        append(&root, &form);
+    }
+    if let Ok(Some(input)) = form.query_selector("input") {
+        if let Some(input) = input.dyn_ref::<HtmlElement>() {
+            let _ = input.focus();
+        }
+    }
+}
+
+fn apply_content_effect(effect: Value) {
+    let kind = effect.get("kind").and_then(Value::as_str).unwrap_or("");
+    match kind {
+        "scroll" => {
+            let x = effect.get("x").and_then(Value::as_f64).unwrap_or(0.0);
+            let y = effect.get("y").and_then(Value::as_f64).unwrap_or(0.0);
+            if let Some(w) = win() {
+                w.scroll_by_with_x_and_y(x, y);
+            }
+        }
+        "half-scroll" => {
+            let dir = effect
+                .get("direction")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0);
+            let count = effect.get("count").and_then(Value::as_f64).unwrap_or(1.0);
+            if let Some(w) = win() {
+                let h = w
+                    .inner_height()
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(600.0);
+                w.scroll_by_with_x_and_y(0.0, h * 0.55 * dir * count);
+            }
+        }
+        "full-scroll" => {
+            let dir = effect
+                .get("direction")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0);
+            let count = effect.get("count").and_then(Value::as_f64).unwrap_or(1.0);
+            if let Some(w) = win() {
+                let h = w
+                    .inner_height()
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(600.0);
+                w.scroll_by_with_x_and_y(0.0, h * 0.9 * dir * count);
+            }
+        }
+        "scroll-top" => {
+            if let Some(w) = win() {
+                w.scroll_to_with_x_and_y(0.0, 0.0);
+            }
+        }
+        "scroll-bottom" => {
+            if let Some(w) = win() {
+                w.scroll_to_with_x_and_y(0.0, 1_000_000.0);
+            }
+        }
+        "scroll-left" => {
+            if let Some(w) = win() {
+                w.scroll_to_with_x_and_y(0.0, w.scroll_y().unwrap_or(0.0));
+            }
+        }
+        "scroll-right" => {
+            if let Some(w) = win() {
+                w.scroll_to_with_x_and_y(1_000_000.0, w.scroll_y().unwrap_or(0.0));
+            }
+        }
+        "clear-overlays" => clear_overlays(),
+        "help" => show_help(),
+        "hints" | "hints-general" | "hints-queue" | "hints-download" | "hints-incognito"
+        | "hints-copy-url" => activate_hints(),
+        "find" => show_find(),
+        "vomnibar" | "vomnibar-bookmarks" | "vomnibar-tabs" | "vomnibar-edit-url" => {
+            show_vomnibar()
+        }
+        "reload" => {
+            if let Some(w) = win() {
+                let _ = w.location().reload();
+            }
+        }
+        "history-back" => {
+            if let Some(w) = win() {
+                let _ = w.history().and_then(|h| h.back());
+            }
+        }
+        "history-forward" => {
+            if let Some(w) = win() {
+                let _ = w.history().and_then(|h| h.forward());
+            }
+        }
+        "background" => {
+            let command = effect
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            spawn_local(async move {
+                let _ = send_runtime_message(
+                    to_js(json!({"type":"vimium-crepus", "command": command}))
+                        .unwrap_or(JsValue::NULL),
+                )
+                .await;
+            });
+        }
+        "pass-next-key" => show_hud("Pass next key..."),
+        _ => {}
+    }
+}
+
+fn refresh_content_settings() {
+    spawn_local(async {
+        let _ = settings_seed().await;
+        if let Ok(resp) = settings_get().await {
+            let settings = from_js(resp)
+                .get("settings")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            CONTENT_STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                state.settings = settings;
+                state.enabled = true;
+            });
+        }
+    });
+}
+
+#[wasm_bindgen]
+pub fn content_main() {
+    CONTENT_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.enabled = true;
+        state.key_state = key_handler::KeyState::new();
+    });
+    refresh_content_settings();
+    if let Ok(guard) = browser_runtime::on_message_value(|message, _sender| {
+        let msg = from_js(message);
+        if msg.get("type").and_then(Value::as_str) == Some("settings:changed") {
+            refresh_content_settings();
+        }
+    }) {
+        EVENT_GUARDS.with(|guards| guards.borrow_mut().push(guard));
+    }
+    let Some(document) = doc() else {
+        return;
+    };
+    let closure = Closure::<dyn FnMut(KeyboardEvent)>::wrap(Box::new(
+        move |event: KeyboardEvent| {
+            let key = key_handler::key_name(&event.key());
+            let hints_mode = CONTENT_STATE.with(|state| state.borrow().key_state.mode == "hints");
+            if hints_mode && key != "Esc" {
+                event.prevent_default();
+                event.stop_propagation();
+                if key.len() == 1 {
+                    update_hints(&key);
+                }
+                return;
+            }
+            let editable = is_editable_target(event.target());
+            let state_js = CONTENT_STATE.with(|state| {
+            let state = &state.borrow().key_state;
+            to_js(json!({"mode": state.mode, "sequence": state.sequence, "countText": state.count_text, "input": state.input})).unwrap_or(JsValue::NULL)
+        });
+            let Ok(result_js) = content_key(state_js, &key, editable) else {
+                return;
+            };
+            let result = from_js(result_js);
+            if let Some(next) = result.get("state") {
+                CONTENT_STATE.with(|state| {
+                    let mut state = state.borrow_mut();
+                    state.key_state.mode = next
+                        .get("mode")
+                        .and_then(Value::as_str)
+                        .unwrap_or("normal")
+                        .to_string();
+                    state.key_state.sequence = next
+                        .get("sequence")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    state.key_state.count_text = next
+                        .get("countText")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    state.key_state.input = next
+                        .get("input")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                });
+            }
+            if result
+                .get("prevent")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                event.prevent_default();
+                event.stop_propagation();
+            }
+            if let Some(effect) = result.get("effect").cloned() {
+                apply_content_effect(effect);
+            }
+        },
+    ));
+    let _ = document.add_event_listener_with_callback_and_bool(
+        "keydown",
+        closure.as_ref().unchecked_ref(),
+        true,
+    );
+    closure.forget();
+}
+
+const SETTING_KEYS: &[&str] = &[
+    "scrollStepSize",
+    "smoothScroll",
+    "keyMappings",
+    "linkHintCharacters",
+    "filterLinkHints",
+    "hideHud",
+    "searchUrl",
+    "searchEngines",
+    "newTabDestination",
+    "newTabCustomUrl",
+    "grabBackFocus",
+    "regexFindMode",
+    "waitForEnterForFilteredHints",
+    "helpDialog_showAdvancedCommands",
+];
+
+const BOOL_KEYS: &[&str] = &[
+    "smoothScroll",
+    "filterLinkHints",
+    "hideHud",
+    "grabBackFocus",
+    "regexFindMode",
+    "waitForEnterForFilteredHints",
+    "helpDialog_showAdvancedCommands",
+];
+
+fn set_status(message: &str, is_error: bool) {
+    let Some(document) = doc() else {
+        return;
+    };
+    let Some(status) = document.get_element_by_id("status") else {
+        return;
+    };
+    status.set_text_content(Some(message));
+    status.set_class_name(if is_error { "status error" } else { "status" });
+}
+
+fn render_options(settings: &Value) {
+    let Some(document) = doc() else {
+        return;
+    };
+    for key in SETTING_KEYS {
+        let Some(element) = document.get_element_by_id(key) else {
+            continue;
+        };
+        if BOOL_KEYS.contains(key) {
+            if let Some(input) = element.dyn_ref::<HtmlInputElement>() {
+                input.set_checked(settings.get(*key).and_then(Value::as_bool).unwrap_or(false));
+            }
+        } else if let Some(input) = element.dyn_ref::<HtmlInputElement>() {
+            input.set_value(
+                &settings
+                    .get(*key)
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| {
+                        settings.get(*key).map(Value::to_string).unwrap_or_default()
+                    }),
+            );
+        } else if let Some(textarea) = element.dyn_ref::<HtmlTextAreaElement>() {
+            textarea.set_value(settings.get(*key).and_then(Value::as_str).unwrap_or(""));
+        }
+    }
+}
+
+fn collect_options() -> Value {
+    let Some(document) = doc() else {
+        return json!({});
+    };
+    let mut map = serde_json::Map::new();
+    for key in SETTING_KEYS {
+        let Some(element) = document.get_element_by_id(key) else {
+            continue;
+        };
+        if BOOL_KEYS.contains(key) {
+            if let Some(input) = element.dyn_ref::<HtmlInputElement>() {
+                map.insert((*key).to_string(), json!(input.checked()));
+            }
+        } else if let Some(input) = element.dyn_ref::<HtmlInputElement>() {
+            if input.type_() == "number" {
+                map.insert(
+                    (*key).to_string(),
+                    json!(input.value().parse::<i64>().unwrap_or(0)),
+                );
+            } else {
+                map.insert((*key).to_string(), json!(input.value()));
+            }
+        } else if let Some(textarea) = element.dyn_ref::<HtmlTextAreaElement>() {
+            map.insert((*key).to_string(), json!(textarea.value()));
+        }
+    }
+    Value::Object(map)
+}
+
+fn load_options() {
+    spawn_local(async {
+        let _ = settings_seed().await;
+        match settings_get().await {
+            Ok(resp) => {
+                let settings = from_js(resp)
+                    .get("settings")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                render_options(&settings);
+            }
+            Err(error) => set_status(&format!("Error: {error:?}"), true),
+        }
+    });
+}
+
+#[wasm_bindgen]
+pub fn options_main() {
+    load_options();
+    let Some(document) = doc() else {
+        return;
+    };
+    if let Some(save) = document.get_element_by_id("saveBtn") {
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_event| {
+            let values = collect_options();
+            spawn_local(async move {
+                match settings_set(to_js(values).unwrap_or(JsValue::NULL)).await {
+                    Ok(_) => {
+                        let _ = notify_settings_changed().await;
+                        load_options();
+                        set_status("Settings saved.", false);
+                    }
+                    Err(error) => set_status(&format!("Error: {error:?}"), true),
+                }
+            });
+        }));
+        let _ = save.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        closure.forget();
+    }
+    if let Some(reset) = document.get_element_by_id("resetBtn") {
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_event| {
+            spawn_local(async move {
+                match settings_clear().await {
+                    Ok(_) => {
+                        let _ = notify_settings_changed().await;
+                        load_options();
+                        set_status("Settings reset to defaults.", false);
+                    }
+                    Err(error) => set_status(&format!("Error: {error:?}"), true),
+                }
+            });
+        }));
+        let _ = reset.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+        closure.forget();
+    }
+}
+
+#[wasm_bindgen]
+pub fn popup_main() {
+    if let Ok(output) = render_popup(JsValue::NULL) {
+        let value = from_js(output);
+        if let Some(css) = value.get("css").and_then(Value::as_str) {
+            if let Some(document) = doc() {
+                if let Ok(style) = document.create_element("style") {
+                    style.set_text_content(Some(css));
+                    if let Some(head) = document.head() {
+                        let _ = head.append_child(&style);
+                    }
+                }
+            }
+        }
+        if let Some(html) = value.get("html").and_then(Value::as_str) {
+            if let Some(root) = doc().and_then(|d| d.get_element_by_id("root")) {
+                root.set_inner_html(html);
+            }
+        }
+    }
+}
