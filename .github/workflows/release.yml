@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "rs_vimiumv*"
+      - "rs_vimium-v*"
 
 env:
   CARGO_TERM_COLOR: always
