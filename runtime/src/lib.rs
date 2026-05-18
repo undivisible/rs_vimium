@@ -443,13 +443,13 @@ use std::cell::RefCell;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{
-    Document, Element, HtmlElement, HtmlInputElement, HtmlTextAreaElement, KeyboardEvent, Window,
+    Document, Element, HtmlElement, HtmlInputElement, HtmlTextAreaElement, KeyboardEvent, Node,
+    Range, Window,
 };
 
 thread_local! {
     static CONTENT_STATE: RefCell<ContentDomState> = RefCell::new(ContentDomState::default());
     static EVENT_GUARDS: RefCell<Vec<EventListenerGuard>> = const { RefCell::new(Vec::new()) };
-    static FIND_TIMER: RefCell<Option<i32>> = const { RefCell::new(None) };
 }
 
 #[derive(Default)]
@@ -459,6 +459,9 @@ struct ContentDomState {
     hints: Vec<HintDom>,
     hint_input: String,
     last_find_query: String,
+    find_initial_range: Option<Range>,
+    find_matches: Vec<FindMatch>,
+    find_active_index: usize,
     settings: Value,
 }
 
@@ -466,6 +469,13 @@ struct HintDom {
     label: String,
     marker: Element,
     target: Element,
+}
+
+#[derive(Clone)]
+struct FindMatch {
+    node: Node,
+    start: u32,
+    end: u32,
 }
 
 fn win() -> Option<Window> {
@@ -696,6 +706,21 @@ fn show_find() {
     let Some(document) = doc() else {
         return;
     };
+    let initial_range = current_selection_range().or_else(|| {
+        let body = document.body()?;
+        let range = document.create_range().ok()?;
+        let body_node: Node = body.into();
+        let _ = range.set_start(&body_node, 0);
+        let _ = range.set_end(&body_node, 0);
+        Some(range)
+    });
+    CONTENT_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.key_state.mode = "find".to_string();
+        state.find_initial_range = initial_range;
+        state.find_matches.clear();
+        state.find_active_index = 0;
+    });
     let Ok(panel) = document.create_element("div") else {
         return;
     };
@@ -712,7 +737,8 @@ fn show_find() {
             input.set_value(&previous);
             let _ = input.focus();
             if !previous.is_empty() {
-                schedule_find(previous);
+                run_find_in_place(&previous);
+                let _ = input.focus();
             }
             let input_for_input = input.clone();
             let input_closure =
@@ -725,7 +751,8 @@ fn show_find() {
                     CONTENT_STATE.with(|state| {
                         state.borrow_mut().last_find_query = query.clone();
                     });
-                    schedule_find(query);
+                    run_find_in_place(&query);
+                    let _ = input_for_input.focus();
                 }));
             let _ = input
                 .add_event_listener_with_callback("input", input_closure.as_ref().unchecked_ref());
@@ -738,6 +765,11 @@ fn show_find() {
                         "enter" => {
                             event.prevent_default();
                             event.stop_propagation();
+                            CONTENT_STATE.with(|state| {
+                                let query = input_value_from_event_target(&event)
+                                    .unwrap_or_else(find_query);
+                                state.borrow_mut().last_find_query = query;
+                            });
                             if let Some(target) = event
                                 .target()
                                 .and_then(|target| target.dyn_into::<HtmlElement>().ok())
@@ -756,27 +788,53 @@ fn show_find() {
     }
 }
 
-fn schedule_find(query: String) {
-    set_find_count(count_text_matches(&query));
-    FIND_TIMER.with(|timer| {
-        if let Some(handle) = timer.borrow_mut().take() {
-            if let Some(window) = win() {
-                window.clear_timeout_with_handle(handle);
+fn handle_find_key(key: &str, event: &KeyboardEvent) {
+    match key {
+        "Esc" => {
+            CONTENT_STATE.with(|state| {
+                state.borrow_mut().key_state.mode = "normal".to_string();
+            });
+            clear_overlays();
+        }
+        "enter" => {
+            CONTENT_STATE.with(|state| {
+                state.borrow_mut().key_state.mode = "normal".to_string();
+            });
+            if let Some(target) = event
+                .target()
+                .and_then(|target| target.dyn_into::<HtmlElement>().ok())
+            {
+                let _ = target.blur();
             }
         }
-    });
-    let closure = Closure::<dyn FnMut()>::wrap(Box::new(move || {
-        run_find(&query, false);
-    }));
-    if let Some(window) = win() {
-        if let Ok(handle) = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-            closure.as_ref().unchecked_ref(),
-            90,
-        ) {
-            FIND_TIMER.with(|timer| {
-                *timer.borrow_mut() = Some(handle);
+        "backspace" => {
+            let mut query = find_query();
+            query.pop();
+            set_find_input_value(&query);
+            CONTENT_STATE.with(|state| {
+                state.borrow_mut().last_find_query = query.clone();
             });
-            closure.forget();
+            run_find_in_place(&query);
+        }
+        _ if key.len() == 1 => {
+            let mut query = find_query();
+            query.push_str(key);
+            set_find_input_value(&query);
+            CONTENT_STATE.with(|state| {
+                state.borrow_mut().last_find_query = query.clone();
+            });
+            run_find_in_place(&query);
+        }
+        _ => {}
+    }
+}
+
+fn set_find_input_value(query: &str) {
+    if let Some(document) = doc() {
+        if let Ok(Some(input)) = document.query_selector(".vc-find-input") {
+            if let Some(input) = input.dyn_ref::<HtmlInputElement>() {
+                input.set_value(query);
+            }
         }
     }
 }
@@ -795,47 +853,187 @@ fn find_query() -> String {
     CONTENT_STATE.with(|state| state.borrow().last_find_query.clone())
 }
 
+fn input_value_from_event_target(event: &KeyboardEvent) -> Option<String> {
+    event
+        .target()?
+        .dyn_into::<HtmlInputElement>()
+        .ok()
+        .map(|input| input.value())
+}
+
 fn find_next(reverse: bool) {
     let query = find_query();
     if query.is_empty() {
         show_find();
         return;
     }
-    run_find(&query, reverse);
+    let has_matches = CONTENT_STATE.with(|state| !state.borrow().find_matches.is_empty());
+    if !has_matches {
+        run_find_in_place(&query);
+    }
+    cycle_find(reverse);
 }
 
-fn run_find(query: &str, reverse: bool) {
-    set_find_count(count_text_matches(query));
-    if let Some(window) = win() {
-        if let Ok(function) = js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("find"))
-            .and_then(|v| v.dyn_into::<js_sys::Function>())
-        {
-            let _ = function.call6(
-                window.as_ref(),
-                &JsValue::from_str(query),
-                &JsValue::FALSE,
-                &JsValue::from_bool(reverse),
-                &JsValue::TRUE,
-                &JsValue::FALSE,
-                &JsValue::FALSE,
-            );
+fn run_find_in_place(query: &str) {
+    restore_find_initial_range();
+    let matches = collect_find_matches(query);
+    set_find_count(matches.len());
+    CONTENT_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.find_matches = matches;
+        state.find_active_index = 0;
+    });
+    highlight_active_find();
+}
+
+fn cycle_find(reverse: bool) {
+    CONTENT_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let len = state.find_matches.len();
+        if len == 0 {
+            return;
+        }
+        if reverse {
+            state.find_active_index = (state.find_active_index + len - 1) % len;
+        } else {
+            state.find_active_index = (state.find_active_index + 1) % len;
+        }
+    });
+    highlight_active_find();
+}
+
+fn current_selection_range() -> Option<Range> {
+    let selection = win()?.get_selection().ok()??;
+    if selection.range_count() == 0 {
+        return None;
+    }
+    selection.get_range_at(0).ok()
+}
+
+fn restore_find_initial_range() {
+    let Some(range) = CONTENT_STATE.with(|state| state.borrow().find_initial_range.clone()) else {
+        return;
+    };
+    if let Some(selection) = win().and_then(|w| w.get_selection().ok()).flatten() {
+        let _ = selection.remove_all_ranges();
+        let _ = selection.add_range(&range);
+    }
+}
+
+fn collect_find_matches(query: &str) -> Vec<FindMatch> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let ignore_case = !query.chars().any(|ch| ch.is_uppercase());
+    let needle = if ignore_case {
+        query.to_lowercase()
+    } else {
+        query.to_string()
+    };
+    let mut matches = Vec::new();
+    if let Some(body) = doc().and_then(|document| document.body()) {
+        collect_find_matches_in_node(&body.into(), &needle, ignore_case, &mut matches);
+    }
+    matches
+}
+
+fn collect_find_matches_in_node(
+    node: &Node,
+    needle: &str,
+    ignore_case: bool,
+    matches: &mut Vec<FindMatch>,
+) {
+    if node.node_type() == Node::TEXT_NODE {
+        let text = node.text_content().unwrap_or_default();
+        let haystack = if ignore_case {
+            text.to_lowercase()
+        } else {
+            text.clone()
+        };
+        for (start, segment) in haystack.match_indices(needle) {
+            matches.push(FindMatch {
+                node: node.clone(),
+                start: start as u32,
+                end: (start + segment.len()) as u32,
+            });
+        }
+        return;
+    }
+    if node.node_type() != Node::ELEMENT_NODE {
+        return;
+    }
+    let element = node.dyn_ref::<Element>();
+    if matches!(
+        element.map(|el| el.tag_name().to_lowercase()).as_deref(),
+        Some("script" | "style" | "noscript" | "textarea" | "input")
+    ) {
+        return;
+    }
+    if let Some(element) = element {
+        if !visible_or_contents(element) {
+            return;
+        }
+    }
+    let children = node.child_nodes();
+    for i in 0..children.length() {
+        if let Some(child) = children.item(i) {
+            collect_find_matches_in_node(&child, needle, ignore_case, matches);
         }
     }
 }
 
-fn count_text_matches(query: &str) -> usize {
-    if query.is_empty() {
-        return 0;
+fn visible_or_contents(element: &Element) -> bool {
+    if visible(element) {
+        return true;
     }
+    win()
+        .and_then(|window| window.get_computed_style(element).ok().flatten())
+        .and_then(|style| style.get_property_value("display").ok())
+        .as_deref()
+        == Some("contents")
+}
+
+fn highlight_active_find() {
+    let active = CONTENT_STATE.with(|state| {
+        let state = state.borrow();
+        state.find_matches.get(state.find_active_index).cloned()
+    });
+    let Some(active) = active else {
+        return;
+    };
     let Some(document) = doc() else {
-        return 0;
+        return;
     };
-    let Some(body) = document.body() else {
-        return 0;
+    let Ok(range) = document.create_range() else {
+        return;
     };
-    let text = body.inner_text().to_lowercase();
-    let needle = query.to_lowercase();
-    text.match_indices(&needle).count()
+    let _ = range.set_start(&active.node, active.start);
+    let _ = range.set_end(&active.node, active.end);
+    if let Some(selection) = win()
+        .and_then(|window| window.get_selection().ok())
+        .flatten()
+    {
+        let _ = selection.remove_all_ranges();
+        let _ = selection.add_range(&range);
+    }
+    scroll_range_to_view(&range);
+}
+
+fn scroll_range_to_view(range: &Range) {
+    let rect = range.get_bounding_client_rect();
+    let Some(window) = win() else {
+        return;
+    };
+    let height = window
+        .inner_height()
+        .ok()
+        .and_then(|value| value.as_f64())
+        .unwrap_or(600.0);
+    if rect.top() < 0.0 || rect.bottom() > height {
+        let target =
+            window.scroll_y().unwrap_or(0.0) + rect.top() + rect.height() / 2.0 - height / 2.0;
+        window.scroll_to_with_x_and_y(window.scroll_x().unwrap_or(0.0), target);
+    }
 }
 
 fn set_find_count(count: usize) {
@@ -994,6 +1192,13 @@ pub fn content_main() {
     let closure = Closure::<dyn FnMut(KeyboardEvent)>::wrap(Box::new(
         move |event: KeyboardEvent| {
             let key = key_handler::key_name(&event.key());
+            let find_mode = CONTENT_STATE.with(|state| state.borrow().key_state.mode == "find");
+            if find_mode {
+                event.prevent_default();
+                event.stop_propagation();
+                handle_find_key(&key, &event);
+                return;
+            }
             let hints_mode = CONTENT_STATE.with(|state| state.borrow().key_state.mode == "hints");
             if hints_mode && key != "Esc" {
                 event.prevent_default();
