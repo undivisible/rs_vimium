@@ -1,6 +1,6 @@
 # rs_vimium
 
-Rust-first Manifest V3 Vimium rewrite built with [Crepuscularity](https://crepuscularity.undivisible.dev).
+The hacker's browser in rust.
 
 ## Build
 
@@ -18,7 +18,7 @@ Load `/Users/undivisible/projects/rs_vimium/dist/unpacked` as an unpacked extens
 
 - `webext.toml` is the extension manifest source of truth.
 - `runtime/` contains the Rust/WASM runtime.
-- `src/` contains browser glue for MV3 service worker, content script, popup, and options page.
+- `src/` contains extension CSS. Crepuscularity emits the MV3 host scripts at build time.
 - `pages/` contains extension HTML entrypoints.
 - `views/` contains Crepuscularity UI templates.
 - `icons/` and `resources/` contain packaged extension assets.

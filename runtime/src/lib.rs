@@ -68,7 +68,7 @@ pub fn runtime_version() -> String {
 #[wasm_bindgen]
 pub fn render_popup(_state: JsValue) -> Result<JsValue, JsValue> {
     let mut ctx = TemplateContext::new();
-    ctx.set("title", "Vimium");
+    ctx.set("title", "rs_vimium");
     ctx.set("status", "Enabled");
     ctx.set("groups", json_to_template(shortcut_groups_json_val()));
     let html = render_component_file_to_html(UI_CREPUS, "Popup", &ctx)

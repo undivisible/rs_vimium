@@ -1,7 +1,7 @@
 [extension]
-name = "Vimium"
+name = "rs_vimium"
 version = "2.4.2"
-description = "The Hacker's Browser. Vimium provides keyboard shortcuts for navigation and control in the spirit of Vim."
+description = "The hacker's browser in rust"
 homepage = "https://github.com/undivisible/rs_vimium"
 minimum_chrome_version = "117.0"
 
@@ -58,7 +58,7 @@ resources = [
 matches = ["<all_urls>"]
 
 [commands._execute_action]
-description = "Open Vimium popup"
+description = "Open rs_vimium popup"
 
 [commands._execute_action.suggested_key]
 default = "Alt+Shift+V"
