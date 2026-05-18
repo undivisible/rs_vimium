@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "rs-v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout rs_vimium
+        uses: actions/checkout@v4
+        with:
+          path: rs_vimium
+
+      - name: Checkout crepuscularity
+        uses: actions/checkout@v4
+        with:
+          repository: tschk/crepuscularity
+          path: crepuscularity
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rs_vimium
+            crepuscularity
+
+      - name: Install wasm-bindgen
+        run: cargo install wasm-bindgen-cli --locked --version 0.2.117
+
+      - name: Format
+        run: cargo fmt --all -- --check
+        working-directory: rs_vimium
+
+      - name: Test
+        run: cargo test --all-features
+        working-directory: rs_vimium
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: rs_vimium
+
+      - name: WASM check
+        run: cargo check --target wasm32-unknown-unknown --manifest-path runtime/Cargo.toml
+        working-directory: rs_vimium
+
+      - name: Upstream webext tests
+        run: cargo test -p crepuscularity-webext
+        working-directory: crepuscularity
+
+      - name: Upstream webext WASM check
+        run: cargo check -p crepuscularity-webext --features wasm
+        working-directory: crepuscularity
+
+      - name: Build unpacked extension
+        run: cargo run -p crepuscularity-cli -- webext build --app "$GITHUB_WORKSPACE/rs_vimium"
+        working-directory: crepuscularity
+
+      - name: Package unpacked extension
+        run: zip -r ../rs_vimium-unpacked.zip unpacked
+        working-directory: rs_vimium/dist
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: rs_vimium/rs_vimium-unpacked.zip
