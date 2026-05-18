@@ -5,10 +5,6 @@ The hacker's browser in rust. Built with [Crepuscularity](https://github.com/tsc
 ## Build
 
 ```sh
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
-cargo check --target wasm32-unknown-unknown --manifest-path runtime/Cargo.toml
 crepus webext build --app .
 ```
 
