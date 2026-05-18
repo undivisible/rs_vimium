@@ -1,6 +1,5 @@
 import init, * as runtime from "../vendor/runtime.js";
 
-const api = globalThis.browser ?? globalThis.chrome;
 const wasmBytes = await fetch("../vendor/runtime_bg.wasm").then((response) => response.arrayBuffer());
 await init({ module_or_path: wasmBytes });
 await runtime.settings_seed();
@@ -34,24 +33,6 @@ const boolKeys = [
 
 let currentSettings = {};
 
-function storageSet(values) {
-  const result = api.storage.sync.set(values);
-  return result?.then ? result : Promise.resolve(result);
-}
-
-function storageClear() {
-  const result = api.storage.sync.clear();
-  return result?.then ? result : Promise.resolve(result);
-}
-
-function tabsQuery(query) {
-  try {
-    const result = api.tabs.query(query);
-    if (result?.then) return result;
-  } catch (_) {}
-  return new Promise((resolve) => api.tabs.query(query, resolve));
-}
-
 async function load() {
   try {
     const response = await runtime.settings_get();
@@ -60,18 +41,6 @@ async function load() {
     currentSettings = {};
   }
   render();
-}
-
-async function notifyContentScripts() {
-  const tabs = await tabsQuery({});
-  for (const tab of tabs) {
-    if (!tab.id || !tab.url || !/^https?:/.test(tab.url)) continue;
-    try {
-      const result = api.tabs.sendMessage(tab.id, { type: "settings:changed" });
-      if (result?.catch) result.catch(() => {});
-    } catch (_) {
-    }
-  }
 }
 
 function render() {
@@ -110,9 +79,8 @@ function setStatus(message, isError = false) {
 
 document.getElementById("saveBtn").addEventListener("click", async () => {
   try {
-    await storageSet(collect());
-    await runtime.settings_seed();
-    await notifyContentScripts();
+    await runtime.settings_set(collect());
+    await runtime.notify_settings_changed();
     await load();
     setStatus("Settings saved.");
   } catch (error) {
@@ -139,10 +107,9 @@ document.getElementById("resetBtn").addEventListener("click", async () => {
       waitForEnterForFilteredHints: true,
       helpDialog_showAdvancedCommands: false,
     };
-    await storageClear();
-    await storageSet(defaults);
-    await runtime.settings_seed();
-    await notifyContentScripts();
+    await runtime.settings_clear();
+    await runtime.settings_set(defaults);
+    await runtime.notify_settings_changed();
     await load();
     setStatus("Settings reset to defaults.");
   } catch (error) {

@@ -1,6 +1,6 @@
 # rs_vimium
 
-Rust-first Manifest V3 Vimium rewrite built with Crepuscularity.
+Rust-first Manifest V3 Vimium rewrite built with [Crepuscularity](https://crepuscularity.undivisible.dev).
 
 ## Build
 

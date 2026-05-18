@@ -7,7 +7,7 @@ pub mod vomnibar;
 use commands::KeyMapRegistry;
 use crepuscularity_core::context::{TemplateContext, TemplateValue};
 use crepuscularity_web::render_component_file_to_html;
-use crepuscularity_webext::wasm::{runtime as browser_runtime, storage};
+use crepuscularity_webext::wasm::{runtime as browser_runtime, storage, tabs};
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -139,7 +139,7 @@ fn command_keys_for_name(cmd_name: &str) -> String {
 #[wasm_bindgen]
 pub async fn settings_get() -> Result<JsValue, JsValue> {
     let stored = storage::sync()
-        .get_json(json!({"enabled": true}))
+        .get_json(Value::Null)
         .await
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     if let Ok(mut s) = USER_SETTINGS.lock() {
@@ -155,7 +155,7 @@ pub async fn settings_get() -> Result<JsValue, JsValue> {
 #[wasm_bindgen]
 pub async fn settings_seed() -> Result<JsValue, JsValue> {
     let stored = storage::sync()
-        .get_json(json!({"enabled": true}))
+        .get_json(Value::Null)
         .await
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let pruned = if let Ok(mut s) = USER_SETTINGS.lock() {
@@ -178,17 +178,43 @@ pub async fn settings_seed() -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn settings_seed_from_value(settings: JsValue) -> Result<JsValue, JsValue> {
-    let stored = from_js(settings);
-    let mut merged = json!({});
-    if let Ok(mut s) = USER_SETTINGS.lock() {
-        s.merge(stored);
-        if let Ok(mut mappings) = USER_MAPPINGS.lock() {
-            *mappings = COMMAND_REGISTRY.parse_user_mappings(&s.get_str("keyMappings"));
+pub async fn settings_set(values: JsValue) -> Result<JsValue, JsValue> {
+    let values = from_js(values);
+    storage::sync()
+        .set(&values)
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    settings_seed().await
+}
+
+#[wasm_bindgen]
+pub async fn settings_clear() -> Result<JsValue, JsValue> {
+    storage::sync()
+        .clear()
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    settings_seed().await
+}
+
+#[wasm_bindgen]
+pub async fn notify_settings_changed() -> Result<JsValue, JsValue> {
+    let all_tabs = tabs::query(&tabs::QueryInfo::default())
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    for tab in all_tabs {
+        let Some(tab_id) = tab.id else {
+            continue;
+        };
+        let Some(url) = tab.url else {
+            continue;
+        };
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            continue;
         }
-        merged = s.settings.clone();
+        let message = to_js(json!({"type": "settings:changed"}))?;
+        let _ = tabs::send_message_value(tab_id, message).await;
     }
-    to_js(json!({"ok": true, "settings": merged}))
+    to_js(json!({"ok": true}))
 }
 
 #[wasm_bindgen]

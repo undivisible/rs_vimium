@@ -19,32 +19,10 @@
   let lastUsedTabId = null;
   let vomnibarDebounceTimer = null;
 
-  function sendRuntimeMessage(message) {
-    try {
-      const result = runtimeApi.sendMessage(message);
-      if (result?.then) return result;
-    } catch (_) {}
-    return new Promise((resolve, reject) => {
-      runtimeApi.sendMessage(message, (response) => {
-        const error = globalThis.chrome?.runtime?.lastError;
-        if (error) reject(new Error(error.message));
-        else resolve(response);
-      });
-    });
-  }
-
-  function storageSyncGet(keys) {
-    try {
-      const result = api.storage.sync.get(keys);
-      if (result?.then) return result;
-    } catch (_) {}
-    return new Promise((resolve) => api.storage.sync.get(keys, resolve));
-  }
-
   async function loadSettings() {
     try {
-      const stored = await storageSyncGet(null);
-      const resp = runtime.settings_seed_from_value(stored ?? {});
+      await runtime.settings_seed();
+      const resp = await runtime.settings_get();
       settings = resp?.settings ?? {};
     } catch (_) { settings = {}; }
   }
@@ -74,9 +52,9 @@
     lastSettingsRefresh = Date.now();
   }
 
-  async function refreshSettingsIfStale() {
+  function refreshSettingsIfStale() {
     if (Date.now() - lastSettingsRefresh > 1000) {
-      await refreshSettings();
+      refreshSettings().catch(() => {});
     }
   }
 
@@ -111,7 +89,7 @@
   }
 
   function send(command, extra = {}) {
-    sendRuntimeMessage({ type: "vimium-crepus", command, ...extra }).catch(() => {});
+    runtime.send_runtime_message({ type: "vimium-crepus", command, ...extra }).catch(() => {});
   }
 
   function isEditable(target) {
@@ -582,7 +560,7 @@
     }
   }
 
-  document.addEventListener("keydown", async (ev) => {
+  document.addEventListener("keydown", (ev) => {
     if (!enabled) return;
     const key = runtime.key_name(ev.key);
 
@@ -602,7 +580,7 @@
 
     if (markMode && key !== "Esc") return;
 
-    await refreshSettingsIfStale().catch(() => {});
+    refreshSettingsIfStale();
 
     const result = runtime.content_key(state, key, isEditable(ev.target));
     state = result.state ?? state;
