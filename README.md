@@ -18,8 +18,8 @@ Load `/Users/undivisible/projects/rs_vimium/dist/unpacked` as an unpacked extens
 
 - `webext.toml` is the extension manifest source of truth.
 - `runtime/` contains the Rust/WASM runtime.
-- `src/` contains extension CSS. Crepuscularity emits the MV3 host scripts at build time.
-- `pages/` contains extension HTML entrypoints.
+- `src/` contains `.css.crepus` style assets rendered by `crepus webext build`.
+- `pages/` contains local extension pages written as `.crepus` templates.
 - `views/` contains Crepuscularity UI templates.
 - `icons/` and `resources/` contain packaged extension assets.
 

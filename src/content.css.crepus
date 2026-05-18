@@ -1,3 +1,6 @@
+div
+
+<style>
 .vc-hint{position:absolute;z-index:2147483647;padding:1px 4px;border:1px solid #000;background:#fff;color:#000;font:600 11px/1.25 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:0;pointer-events:none}
 .vc-hint.vc-hint-dim{opacity:.22}
 .vc-hud{position:fixed;z-index:2147483647;left:50%;top:12px;transform:translateX(-50%);padding:4px 10px;border:1px solid #000;background:#fff;color:#000;font:500 12px/1.4 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;white-space:nowrap}
@@ -28,3 +31,4 @@
 ::highlight(rs-vimium-find){background:#e5e5e5;color:#000}
 ::highlight(rs-vimium-find-active){background:#000;color:#fff}
 @media (max-width:560px){.vc-overlay-grid{grid-template-columns:1fr}.vc-group:nth-child(odd){border-right:0}}
+</style>

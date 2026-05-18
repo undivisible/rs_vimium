@@ -679,8 +679,8 @@ use std::cell::RefCell;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::{spawn_local, JsFuture};
 use web_sys::{
-    Document, Element, HtmlElement, HtmlInputElement, HtmlTextAreaElement, KeyboardEvent, Node,
-    Range, Window,
+    Document, Element, HtmlElement, HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement,
+    KeyboardEvent, Node, Range, Window,
 };
 
 thread_local! {
@@ -2549,6 +2549,8 @@ fn render_options(settings: &Value) {
                         settings.get(*key).map(Value::to_string).unwrap_or_default()
                     }),
             );
+        } else if let Some(select) = element.dyn_ref::<HtmlSelectElement>() {
+            select.set_value(settings.get(*key).and_then(Value::as_str).unwrap_or(""));
         } else if let Some(textarea) = element.dyn_ref::<HtmlTextAreaElement>() {
             textarea.set_value(settings.get(*key).and_then(Value::as_str).unwrap_or(""));
         }
@@ -2577,6 +2579,8 @@ fn collect_options() -> Value {
             } else {
                 map.insert((*key).to_string(), json!(input.value()));
             }
+        } else if let Some(select) = element.dyn_ref::<HtmlSelectElement>() {
+            map.insert((*key).to_string(), json!(select.value()));
         } else if let Some(textarea) = element.dyn_ref::<HtmlTextAreaElement>() {
             map.insert((*key).to_string(), json!(textarea.value()));
         }

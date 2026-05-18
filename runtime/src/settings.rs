@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-pub const VIMIUM_NEW_TAB_URL: &str = "https://vimium.github.io/new-tab/";
+pub const VIMIUM_NEW_TAB_URL: &str = "pages/new-tab.html";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NewTabDestination {
@@ -559,6 +559,8 @@ mod tests {
     #[test]
     fn new_tab_url_resolves_destinations() {
         let mut settings = UserSettings::new();
+        assert_eq!("pages/new-tab.html", settings.new_tab_url());
+
         settings.merge(json!({
             "newTabDestination": "browserNewTabPage"
         }));

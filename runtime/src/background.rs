@@ -1,4 +1,4 @@
-use crepuscularity_webext::wasm::{storage, tabs, windows};
+use crepuscularity_webext::wasm::{runtime as browser_runtime, storage, tabs, windows};
 use serde_json::{json, Value};
 
 use crate::settings::{NewTabDestination, UserSettings};
@@ -20,7 +20,7 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
             let settings = load_settings().await?;
             let url = match settings.new_tab_destination() {
                 NewTabDestination::BrowserNewTabPage => None,
-                _ => Some(settings.new_tab_url()),
+                _ => Some(resolve_new_tab_url(&settings.new_tab_url())),
             };
             tabs::create(&tabs::CreateProperties {
                 url,
@@ -278,6 +278,13 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
         _ => return Err(format!("unknown background command: {}", command)),
     }
     Ok(())
+}
+
+fn resolve_new_tab_url(url: &str) -> String {
+    if url.contains("://") || url.starts_with("about:") {
+        return url.to_string();
+    }
+    browser_runtime::get_url(url).unwrap_or_else(|_| url.to_string())
 }
 
 async fn load_settings() -> Result<UserSettings, String> {
