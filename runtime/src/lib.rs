@@ -9,6 +9,7 @@ use crepuscularity_core::context::{TemplateContext, TemplateValue};
 use crepuscularity_web::render_component_file_to_html;
 use crepuscularity_webext::wasm::{runtime as browser_runtime, storage};
 use once_cell::sync::Lazy;
+use serde::Serialize;
 use serde_json::{json, Value};
 use settings::UserSettings;
 use std::sync::Mutex;
@@ -50,7 +51,9 @@ fn json_to_template(value: Value) -> TemplateValue {
 }
 
 fn to_js(value: Value) -> Result<JsValue, JsValue> {
-    serde_wasm_bindgen::to_value(&value).map_err(|e| JsValue::from_str(&e.to_string()))
+    value
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 fn from_js(value: JsValue) -> Value {
@@ -368,7 +371,9 @@ pub async fn handle_background_message(message: JsValue) -> Result<JsValue, JsVa
                     .get("command")
                     .and_then(Value::as_str)
                     .unwrap_or("");
-                background::execute_background_command(cmd_name, &msg)
+                let background_command =
+                    key_handler::background_command_for_registry_name(cmd_name).unwrap_or(cmd_name);
+                background::execute_background_command(background_command, &msg)
                     .await
                     .map_err(|e| JsValue::from_str(&e))?;
                 to_js(json!({"ok": true}))

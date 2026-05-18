@@ -3,6 +3,7 @@
   globalThis.__rsVimiumLoaded = true;
 
   const runtimeApi = globalThis.browser?.runtime ?? globalThis.chrome?.runtime;
+  const api = globalThis.browser ?? globalThis.chrome;
   const runtime = await import(runtimeApi.getURL("vendor/runtime.js"));
   const wasmBytes = await fetch(runtimeApi.getURL("vendor/runtime_bg.wasm")).then((r) => r.arrayBuffer());
   await runtime.default({ module_or_path: wasmBytes });
@@ -298,12 +299,12 @@
     if (ev.shiftKey) {
       markEntry = "global:" + key;
       if (markMode === "create") {
-        chrome.storage.local.set({
+        api.storage.local.set({
           ["vimiumGlobalMark|" + key]: JSON.stringify({ scrollX, scrollY, url: location.href })
         });
         showHUD("Created global mark: " + key);
       } else {
-        chrome.storage.local.get("vimiumGlobalMark|" + key, (items) => {
+        storageLocalGet("vimiumGlobalMark|" + key).then((items) => {
           const data = items["vimiumGlobalMark|" + key];
           if (data) {
             const pos = JSON.parse(data);
@@ -335,6 +336,11 @@
     markMode = null;
     ev.preventDefault();
     ev.stopPropagation();
+  }
+
+  function storageLocalGet(key) {
+    const result = api.storage.local.get(key);
+    return result?.then ? result : new Promise((resolve) => api.storage.local.get(key, resolve));
   }
 
   let vomnibarEl = null;

@@ -333,6 +333,7 @@ dependencies = [
  "crepuscularity-web",
  "crepuscularity-webext",
  "once_cell",
+ "serde",
  "serde-wasm-bindgen",
  "serde_json",
  "wasm-bindgen",

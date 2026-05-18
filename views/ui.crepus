@@ -1,9 +1,3 @@
-+++
-[Popup.defaults]
-title = "Vimium"
-status = "Enabled"
-+++
-
 --- Popup
 div vc-popup
   div vc-header

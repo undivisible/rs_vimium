@@ -151,6 +151,33 @@ fn state_to_val(state: &KeyState) -> Value {
     })
 }
 
+pub fn background_command_for_registry_name(cmd_name: &str) -> Option<&'static str> {
+    match cmd_name {
+        "createTab" => Some("create-tab"),
+        "previousTab" => Some("previous-tab"),
+        "nextTab" => Some("next-tab"),
+        "visitPreviousTab" => Some("visit-previous-tab"),
+        "firstTab" => Some("first-tab"),
+        "lastTab" => Some("last-tab"),
+        "duplicateTab" => Some("duplicate-tab"),
+        "togglePinTab" => Some("toggle-pin"),
+        "toggleMuteTab" => Some("toggle-mute"),
+        "removeTab" => Some("remove-tab"),
+        "restoreTab" => Some("restore-tab"),
+        "moveTabToNewWindow" => Some("move-to-new-window"),
+        "closeTabsOnLeft" => Some("close-tabs-left"),
+        "closeTabsOnRight" => Some("close-tabs-right"),
+        "closeOtherTabs" => Some("close-other-tabs"),
+        "moveTabLeft" => Some("move-tab-left"),
+        "moveTabRight" => Some("move-tab-right"),
+        "setZoom" => Some("set-zoom"),
+        "zoomIn" => Some("zoom-in"),
+        "zoomOut" => Some("zoom-out"),
+        "zoomReset" => Some("zoom-reset"),
+        _ => None,
+    }
+}
+
 pub fn command_effect(cmd_name: &str, count: i64, entry: Option<&CommandEntry>) -> Value {
     let bkg = entry.is_some_and(|e| e.background);
     let no_repeat = entry.is_some_and(|e| e.no_repeat);
@@ -212,27 +239,12 @@ pub fn command_effect(cmd_name: &str, count: i64, entry: Option<&CommandEntry>) 
         "findSelectedBackwards" => json!({"kind": "find-selected", "reverse": true}),
         "goBack" => json!({"kind": "history-back"}),
         "goForward" => json!({"kind": "history-forward"}),
-        "createTab" => json!({"kind": "background", "command": "create-tab"}),
-        "previousTab" => json!({"kind": "background", "command": "previous-tab"}),
-        "nextTab" => json!({"kind": "background", "command": "next-tab"}),
-        "visitPreviousTab" => json!({"kind": "background", "command": "visit-previous-tab"}),
-        "firstTab" => json!({"kind": "background", "command": "first-tab"}),
-        "lastTab" => json!({"kind": "background", "command": "last-tab"}),
-        "duplicateTab" => json!({"kind": "background", "command": "duplicate-tab"}),
-        "togglePinTab" => json!({"kind": "background", "command": "toggle-pin"}),
-        "toggleMuteTab" => json!({"kind": "background", "command": "toggle-mute"}),
-        "removeTab" => json!({"kind": "background", "command": "remove-tab"}),
-        "restoreTab" => json!({"kind": "background", "command": "restore-tab"}),
-        "moveTabToNewWindow" => json!({"kind": "background", "command": "move-to-new-window"}),
-        "closeTabsOnLeft" => json!({"kind": "background", "command": "close-tabs-left"}),
-        "closeTabsOnRight" => json!({"kind": "background", "command": "close-tabs-right"}),
-        "closeOtherTabs" => json!({"kind": "background", "command": "close-other-tabs"}),
-        "moveTabLeft" => json!({"kind": "background", "command": "move-tab-left"}),
-        "moveTabRight" => json!({"kind": "background", "command": "move-tab-right"}),
-        "setZoom" => json!({"kind": "background", "command": "set-zoom"}),
-        "zoomIn" => json!({"kind": "background", "command": "zoom-in"}),
-        "zoomOut" => json!({"kind": "background", "command": "zoom-out"}),
-        "zoomReset" => json!({"kind": "background", "command": "zoom-reset"}),
+        "createTab" | "previousTab" | "nextTab" | "visitPreviousTab" | "firstTab" | "lastTab"
+        | "duplicateTab" | "togglePinTab" | "toggleMuteTab" | "removeTab" | "restoreTab"
+        | "moveTabToNewWindow" | "closeTabsOnLeft" | "closeTabsOnRight" | "closeOtherTabs"
+        | "moveTabLeft" | "moveTabRight" | "setZoom" | "zoomIn" | "zoomOut" | "zoomReset" => {
+            json!({"kind": "background", "command": background_command_for_registry_name(cmd_name)})
+        }
         "passNextKey" => json!({"kind": "pass-next-key"}),
         "toggleViewSource" => json!({"kind": "view-source"}),
         "showHelp" => json!({"kind": "help"}),

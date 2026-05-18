@@ -1,6 +1,8 @@
 use crepuscularity_webext::wasm::{storage, tabs, windows};
 use serde_json::{json, Value};
 
+use crate::settings::{NewTabDestination, UserSettings};
+
 pub async fn active_tab() -> Result<Option<tabs::Tab>, String> {
     let tabs_list = tabs::query(&tabs::QueryInfo {
         active: Some(true),
@@ -15,9 +17,17 @@ pub async fn active_tab() -> Result<Option<tabs::Tab>, String> {
 pub async fn execute_background_command(command: &str, _args: &Value) -> Result<(), String> {
     match command {
         "create-tab" => {
-            tabs::create(&tabs::CreateProperties::default())
-                .await
-                .map_err(|e| e.to_string())?;
+            let settings = load_settings().await?;
+            let url = match settings.new_tab_destination() {
+                NewTabDestination::BrowserNewTabPage => None,
+                _ => Some(settings.new_tab_url()),
+            };
+            tabs::create(&tabs::CreateProperties {
+                url,
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| e.to_string())?;
         }
         "open-url" => {
             let url = _args
@@ -268,6 +278,16 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
         _ => return Err(format!("unknown background command: {}", command)),
     }
     Ok(())
+}
+
+async fn load_settings() -> Result<UserSettings, String> {
+    let stored = storage::sync()
+        .get_json(json!({"enabled": true}))
+        .await
+        .map_err(|e| format!("get settings: {}", e))?;
+    let mut settings = UserSettings::new();
+    settings.merge(stored);
+    Ok(settings)
 }
 
 pub async fn query_current_window() -> Result<Vec<tabs::Tab>, String> {

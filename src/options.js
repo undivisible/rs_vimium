@@ -1,5 +1,6 @@
 import init, * as runtime from "../vendor/runtime.js";
 
+const api = globalThis.browser ?? globalThis.chrome;
 const wasmBytes = await fetch("../vendor/runtime_bg.wasm").then((response) => response.arrayBuffer());
 await init({ module_or_path: wasmBytes });
 await runtime.settings_seed();
@@ -32,6 +33,16 @@ const boolKeys = [
 ];
 
 let currentSettings = {};
+
+function storageSet(values) {
+  const result = api.storage.sync.set(values);
+  return result?.then ? result : Promise.resolve(result);
+}
+
+function storageClear() {
+  const result = api.storage.sync.clear();
+  return result?.then ? result : Promise.resolve(result);
+}
 
 async function load() {
   try {
@@ -79,7 +90,7 @@ function setStatus(message, isError = false) {
 
 document.getElementById("saveBtn").addEventListener("click", async () => {
   try {
-    await chrome.storage.sync.set(collect());
+    await storageSet(collect());
     await runtime.settings_seed();
     await load();
     setStatus("Settings saved.");
@@ -107,8 +118,8 @@ document.getElementById("resetBtn").addEventListener("click", async () => {
       waitForEnterForFilteredHints: true,
       helpDialog_showAdvancedCommands: false,
     };
-    await chrome.storage.sync.clear();
-    await chrome.storage.sync.set(defaults);
+    await storageClear();
+    await storageSet(defaults);
     await runtime.settings_seed();
     await load();
     setStatus("Settings reset to defaults.");

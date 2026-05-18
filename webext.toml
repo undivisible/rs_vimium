@@ -12,6 +12,7 @@ sessions = true
 bookmarks = true
 history = true
 notifications = true
+clipboard = true
 scripting = true
 web-navigation = true
 search = true
@@ -29,7 +30,7 @@ all_frames = true
 match_about_blank = true
 
 [[content_scripts]]
-matches = ["file:///", "file:///*/"]
+matches = ["file:///*"]
 css = ["src/file_urls.css"]
 run_at = "document_start"
 all_frames = true
@@ -49,6 +50,8 @@ open_in_tab = true
 
 [web_accessible_resources]
 resources = [
+    "vendor/runtime.js",
+    "vendor/runtime_bg.wasm",
     "resources/tlds.txt",
     "_favicon/*",
 ]
