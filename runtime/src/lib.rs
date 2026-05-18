@@ -449,6 +449,7 @@ use web_sys::{
 thread_local! {
     static CONTENT_STATE: RefCell<ContentDomState> = RefCell::new(ContentDomState::default());
     static EVENT_GUARDS: RefCell<Vec<EventListenerGuard>> = const { RefCell::new(Vec::new()) };
+    static FIND_TIMER: RefCell<Option<i32>> = const { RefCell::new(None) };
 }
 
 #[derive(Default)]
@@ -457,6 +458,7 @@ struct ContentDomState {
     key_state: key_handler::KeyState,
     hints: Vec<HintDom>,
     hint_input: String,
+    last_find_query: String,
     settings: Value,
 }
 
@@ -634,46 +636,32 @@ fn activate_hints() {
 }
 
 fn update_hints(key: &str) {
-    let labels = CONTENT_STATE.with(|state| {
-        state
-            .borrow()
-            .hints
-            .iter()
-            .map(|hint| hint.label.clone())
-            .collect::<Vec<_>>()
-    });
-    let Ok(labels_js) = to_js(json!(labels)) else {
-        return;
-    };
-    let current = CONTENT_STATE.with(|state| state.borrow().hint_input.clone());
-    let Ok(next_js) = update_hint_state(labels_js, &current, key) else {
-        return;
-    };
-    let next = from_js(next_js);
     CONTENT_STATE.with(|state| {
         let mut state = state.borrow_mut();
-        state.hint_input = next
-            .get("input")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        if let Some(dim) = next.get("dim").and_then(Value::as_array) {
-            for (i, item) in dim.iter().enumerate() {
-                if let Some(hint) = state.hints.get(i) {
-                    let _ = hint
-                        .marker
-                        .class_list()
-                        .toggle_with_force("vc-hint-dim", item.as_bool().unwrap_or(false));
-                }
+        state.hint_input.push_str(&key.to_lowercase());
+        let input = state.hint_input.clone();
+        let mut selected = None;
+        let mut remaining = 0usize;
+        for (i, hint) in state.hints.iter().enumerate() {
+            let matched = hint.label.starts_with(&input);
+            let _ = hint
+                .marker
+                .class_list()
+                .toggle_with_force("vc-hint-dim", !matched);
+            if matched {
+                remaining += 1;
+                selected = Some(i);
+            }
+            if hint.label == input {
+                selected = Some(i);
+                remaining = 1;
+                break;
             }
         }
-        if let Some(selected) = next
-            .get("selected")
-            .and_then(Value::as_u64)
-            .map(|v| v as usize)
-        {
-            if let Some(hint) = state.hints.get(selected) {
+        if remaining == 1 {
+            if let Some(hint) = selected.and_then(|idx| state.hints.get(idx)) {
                 if let Some(el) = hint.target.dyn_ref::<HtmlElement>() {
+                    let _ = el.focus();
                     el.click();
                 }
             }
@@ -708,18 +696,154 @@ fn show_find() {
     let Some(document) = doc() else {
         return;
     };
-    let Ok(form) = document.create_element("form") else {
+    let Ok(panel) = document.create_element("div") else {
         return;
     };
-    form.set_class_name("vc-find");
-    form.set_inner_html(r#"<input type="search" autocomplete="off" class="vc-find-input"><button type="submit" class="vc-find-btn">Find</button>"#);
+    panel.set_class_name("vc-find");
+    panel.set_inner_html(
+        r#"<input type="search" autocomplete="off" class="vc-find-input"><span class="vc-find-count">0</span>"#,
+    );
     if let Some(root) = document.document_element() {
-        append(&root, &form);
+        append(&root, &panel);
     }
-    if let Ok(Some(input)) = form.query_selector("input") {
-        if let Some(input) = input.dyn_ref::<HtmlElement>() {
+    if let Ok(Some(input_el)) = panel.query_selector("input") {
+        if let Some(input) = input_el.dyn_ref::<HtmlInputElement>() {
+            let previous = CONTENT_STATE.with(|state| state.borrow().last_find_query.clone());
+            input.set_value(&previous);
             let _ = input.focus();
+            if !previous.is_empty() {
+                schedule_find(previous);
+            }
+            let input_for_input = input.clone();
+            let input_closure =
+                Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_event| {
+                    let query = input_for_input.value();
+                    if query.is_empty() {
+                        set_find_count(0);
+                        return;
+                    }
+                    CONTENT_STATE.with(|state| {
+                        state.borrow_mut().last_find_query = query.clone();
+                    });
+                    schedule_find(query);
+                }));
+            let _ = input
+                .add_event_listener_with_callback("input", input_closure.as_ref().unchecked_ref());
+            input_closure.forget();
+
+            let key_closure =
+                Closure::<dyn FnMut(KeyboardEvent)>::wrap(Box::new(move |event: KeyboardEvent| {
+                    let key = key_handler::key_name(&event.key());
+                    match key.as_str() {
+                        "enter" => {
+                            event.prevent_default();
+                            event.stop_propagation();
+                            if let Some(target) = event
+                                .target()
+                                .and_then(|target| target.dyn_into::<HtmlElement>().ok())
+                            {
+                                let _ = target.blur();
+                            }
+                        }
+                        "Esc" => clear_overlays(),
+                        _ => {}
+                    }
+                }));
+            let _ = input
+                .add_event_listener_with_callback("keydown", key_closure.as_ref().unchecked_ref());
+            key_closure.forget();
         }
+    }
+}
+
+fn schedule_find(query: String) {
+    set_find_count(count_text_matches(&query));
+    FIND_TIMER.with(|timer| {
+        if let Some(handle) = timer.borrow_mut().take() {
+            if let Some(window) = win() {
+                window.clear_timeout_with_handle(handle);
+            }
+        }
+    });
+    let closure = Closure::<dyn FnMut()>::wrap(Box::new(move || {
+        run_find(&query, false);
+    }));
+    if let Some(window) = win() {
+        if let Ok(handle) = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            closure.as_ref().unchecked_ref(),
+            90,
+        ) {
+            FIND_TIMER.with(|timer| {
+                *timer.borrow_mut() = Some(handle);
+            });
+            closure.forget();
+        }
+    }
+}
+
+fn find_query() -> String {
+    if let Some(document) = doc() {
+        if let Ok(Some(input)) = document.query_selector(".vc-find-input") {
+            if let Some(input) = input.dyn_ref::<HtmlInputElement>() {
+                let value = input.value();
+                if !value.is_empty() {
+                    return value;
+                }
+            }
+        }
+    }
+    CONTENT_STATE.with(|state| state.borrow().last_find_query.clone())
+}
+
+fn find_next(reverse: bool) {
+    let query = find_query();
+    if query.is_empty() {
+        show_find();
+        return;
+    }
+    run_find(&query, reverse);
+}
+
+fn run_find(query: &str, reverse: bool) {
+    set_find_count(count_text_matches(query));
+    if let Some(window) = win() {
+        if let Ok(function) = js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("find"))
+            .and_then(|v| v.dyn_into::<js_sys::Function>())
+        {
+            let _ = function.call6(
+                window.as_ref(),
+                &JsValue::from_str(query),
+                &JsValue::FALSE,
+                &JsValue::from_bool(reverse),
+                &JsValue::TRUE,
+                &JsValue::FALSE,
+                &JsValue::FALSE,
+            );
+        }
+    }
+}
+
+fn count_text_matches(query: &str) -> usize {
+    if query.is_empty() {
+        return 0;
+    }
+    let Some(document) = doc() else {
+        return 0;
+    };
+    let Some(body) = document.body() else {
+        return 0;
+    };
+    let text = body.inner_text().to_lowercase();
+    let needle = query.to_lowercase();
+    text.match_indices(&needle).count()
+}
+
+fn set_find_count(count: usize) {
+    let Some(document) = doc() else {
+        return;
+    };
+    if let Ok(Some(counter)) = document.query_selector(".vc-find-count") {
+        counter.set_text_content(Some(&count.to_string()));
     }
 }
 
@@ -788,6 +912,12 @@ fn apply_content_effect(effect: Value) {
         "hints" | "hints-general" | "hints-queue" | "hints-download" | "hints-incognito"
         | "hints-copy-url" => activate_hints(),
         "find" => show_find(),
+        "find-next" => find_next(
+            effect
+                .get("reverse")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        ),
         "vomnibar" | "vomnibar-bookmarks" | "vomnibar-tabs" | "vomnibar-edit-url" => {
             show_vomnibar()
         }
