@@ -330,27 +330,47 @@ pub fn command_list() -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 pub fn hint_label(index: usize) -> String {
-    hint_label_with_chars(index, "asdfghjklqwertyuiopzxcvbnm")
+    hint_labels_with_chars(index + 1, "asdfghjklqwertyuiopzxcvbnm")
+        .pop()
+        .unwrap_or_default()
 }
 
 pub fn hint_label_with_chars(index: usize, chars: &str) -> String {
+    hint_labels_with_chars(index + 1, chars)
+        .pop()
+        .unwrap_or_default()
+}
+
+fn hint_labels_with_chars(count: usize, chars: &str) -> Vec<String> {
     let chars = chars
+        .to_lowercase()
         .chars()
         .filter(|ch| !ch.is_whitespace())
         .collect::<Vec<_>>();
-    if chars.is_empty() {
-        return String::new();
+    if count == 0 || chars.len() <= 1 {
+        return Vec::new();
     }
-    let mut label = String::new();
-    let mut value = index;
-    loop {
-        label.insert(0, chars[value % chars.len()]);
-        if value < chars.len() {
-            break;
+
+    let mut hints = vec![String::new()];
+    let mut offset = 0usize;
+    while hints.len().saturating_sub(offset) < count || hints.len() == 1 {
+        let hint = hints[offset].clone();
+        offset += 1;
+        for ch in &chars {
+            hints.push(format!("{ch}{hint}"));
         }
-        value = value / chars.len() - 1;
     }
-    label
+
+    let mut labels = hints
+        .into_iter()
+        .skip(offset)
+        .take(count)
+        .collect::<Vec<_>>();
+    labels.sort();
+    labels
+        .into_iter()
+        .map(|label| label.chars().rev().collect())
+        .collect()
 }
 
 #[wasm_bindgen]
@@ -374,13 +394,11 @@ pub fn update_hint_state(labels: JsValue, current: &str, key: &str) -> Result<Js
         }
     }
 
-    let selected = exact.or_else(|| {
-        if remaining.len() == 1 {
-            remaining.first().copied()
-        } else {
-            None
-        }
-    });
+    let selected = if remaining.len() == 1 {
+        exact.or_else(|| remaining.first().copied())
+    } else {
+        None
+    };
     to_js(json!({"input": next_input, "dim": dim, "selected": selected}))
 }
 
@@ -1531,7 +1549,7 @@ fn activate_hints(action: &str) {
     };
     let scroll_x = win().and_then(|w| w.scroll_x().ok()).unwrap_or(0.0);
     let scroll_y = win().and_then(|w| w.scroll_y().ok()).unwrap_or(0.0);
-    let mut hints = Vec::new();
+    let mut targets = Vec::new();
     let chars = setting_value(
         "linkHintCharacters",
         Value::String("sadfjklewcmpgh".to_string()),
@@ -1550,15 +1568,19 @@ fn activate_hints(action: &str) {
             continue;
         }
         let rect = target.get_bounding_client_rect();
+        targets.push((target, rect.left(), rect.top()));
+    }
+    let labels = hint_labels_with_chars(targets.len(), &chars);
+    let mut hints = Vec::new();
+    for ((target, left, top), label) in targets.into_iter().zip(labels) {
         let Ok(marker) = document.create_element("span") else {
             continue;
         };
         marker.set_class_name("vc-hint");
-        let label = hint_label_with_chars(hints.len(), &chars);
         set_text(&marker, &label);
         if let Some(style) = marker.dyn_ref::<HtmlElement>().map(|el| el.style()) {
-            let _ = style.set_property("left", &format!("{}px", (rect.left() + scroll_x).max(2.0)));
-            let _ = style.set_property("top", &format!("{}px", (rect.top() + scroll_y).max(2.0)));
+            let _ = style.set_property("left", &format!("{}px", (left + scroll_x).max(2.0)));
+            let _ = style.set_property("top", &format!("{}px", (top + scroll_y).max(2.0)));
         }
         if let Some(root) = document.document_element() {
             append(&root, &marker);
@@ -1595,10 +1617,8 @@ fn update_hints(key: &str) {
                 remaining += 1;
                 selected = Some(i);
             }
-            if hint.label == input {
+            if hint.label == input && remaining == 1 {
                 selected = Some(i);
-                remaining = 1;
-                break;
             }
         }
         if remaining == 1 {
@@ -3049,6 +3069,29 @@ pub fn popup_main() {
         if let Some(html) = value.get("html").and_then(Value::as_str) {
             if let Some(root) = doc().and_then(|d| d.get_element_by_id("root")) {
                 root.set_inner_html(html);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hint_labels_match_vimium_prefix_free_generation() {
+        assert_eq!(hint_labels_with_chars(2, "ab"), vec!["a", "b"]);
+        assert_eq!(hint_labels_with_chars(3, "ab"), vec!["aa", "b", "ab"]);
+    }
+
+    #[test]
+    fn hint_labels_do_not_assign_prefixes() {
+        let labels = hint_labels_with_chars(80, "sadfjklewcmpgh");
+        for (i, label) in labels.iter().enumerate() {
+            for (j, other) in labels.iter().enumerate() {
+                if i != j {
+                    assert!(!other.starts_with(label), "{label} prefixes {other}");
+                }
             }
         }
     }
