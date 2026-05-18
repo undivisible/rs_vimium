@@ -1,6 +1,6 @@
 [package]
 name = "rs_vimium_runtime"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "Rust runtime for rs_vimium"
 license.workspace = true

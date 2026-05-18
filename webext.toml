@@ -1,6 +1,6 @@
 [extension]
 name = "rs_vimium"
-version = "2.4.2"
+version = "1.0.0"
 description = "The hacker's browser in rust"
 homepage = "https://github.com/undivisible/rs_vimium"
 minimum_chrome_version = "117.0"

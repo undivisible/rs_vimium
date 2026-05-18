@@ -1420,7 +1420,7 @@ fn pattern_link(patterns: &str) -> Option<Element> {
         let words = text.split_whitespace().count().max(1);
         candidates.push((words, pattern_index, candidates.len(), element));
     }
-    candidates.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
+    candidates.sort_by_key(|a| (a.0, a.1, a.2));
     candidates
         .into_iter()
         .map(|(_, _, _, element)| element)
@@ -2546,23 +2546,20 @@ fn apply_content_effect(effect: Value) {
         "hints" | "hints-general" | "hints-queue" | "hints-download" | "hints-incognito"
         | "hints-copy-url" => {
             let action = match kind {
-                "hints" => {
+                "hints"
                     if effect
                         .get("newTab")
                         .and_then(Value::as_bool)
+                        .unwrap_or(false) =>
+                {
+                    if effect
+                        .get("foreground")
+                        .and_then(Value::as_bool)
                         .unwrap_or(false)
                     {
-                        if effect
-                            .get("foreground")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false)
-                        {
-                            "foreground-tab"
-                        } else {
-                            "new-tab"
-                        }
+                        "foreground-tab"
                     } else {
-                        "current"
+                        "new-tab"
                     }
                 }
                 "hints-queue" => "queue",
