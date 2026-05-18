@@ -15,20 +15,70 @@
   let lastFind = "";
   let visualMode = null;
   let settings = null;
+  let lastSettingsRefresh = 0;
   let lastUsedTabId = null;
   let vomnibarDebounceTimer = null;
 
+  function sendRuntimeMessage(message) {
+    try {
+      const result = runtimeApi.sendMessage(message);
+      if (result?.then) return result;
+    } catch (_) {}
+    return new Promise((resolve, reject) => {
+      runtimeApi.sendMessage(message, (response) => {
+        const error = globalThis.chrome?.runtime?.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve(response);
+      });
+    });
+  }
+
+  function storageSyncGet(keys) {
+    try {
+      const result = api.storage.sync.get(keys);
+      if (result?.then) return result;
+    } catch (_) {}
+    return new Promise((resolve) => api.storage.sync.get(keys, resolve));
+  }
+
   async function loadSettings() {
     try {
-      const resp = await runtime.send_runtime_message({ type: "settings:get" });
+      const stored = await storageSyncGet(null);
+      const resp = runtime.settings_seed_from_value(stored ?? {});
       settings = resp?.settings ?? {};
     } catch (_) { settings = {}; }
   }
 
-  runtime.settings_seed().then(async () => {
+  refreshSettings().catch(() => {});
+
+  window.addEventListener("focus", () => {
+    refreshSettings().catch(() => {});
+  });
+
+  api.storage?.onChanged?.addListener((changes, area) => {
+    if (area !== "sync") return;
+    refreshSettings();
+  });
+
+  runtimeApi.onMessage?.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== "settings:changed") return false;
+    refreshSettings().then(() => sendResponse?.({ ok: true })).catch((error) => {
+      sendResponse?.({ ok: false, error: String(error) });
+    });
+    return true;
+  });
+
+  async function refreshSettings() {
     await loadSettings();
     checkExclusion();
-  }).catch(() => {});
+    lastSettingsRefresh = Date.now();
+  }
+
+  async function refreshSettingsIfStale() {
+    if (Date.now() - lastSettingsRefresh > 1000) {
+      await refreshSettings();
+    }
+  }
 
   function setting(key, fallback) {
     if (settings && settings[key] !== undefined) return settings[key];
@@ -61,7 +111,7 @@
   }
 
   function send(command, extra = {}) {
-    runtime.send_runtime_message({ type: "vimium-crepus", command, ...extra }).catch(() => {});
+    sendRuntimeMessage({ type: "vimium-crepus", command, ...extra }).catch(() => {});
   }
 
   function isEditable(target) {
@@ -532,7 +582,7 @@
     }
   }
 
-  document.addEventListener("keydown", (ev) => {
+  document.addEventListener("keydown", async (ev) => {
     if (!enabled) return;
     const key = runtime.key_name(ev.key);
 
@@ -551,6 +601,8 @@
     }
 
     if (markMode && key !== "Esc") return;
+
+    await refreshSettingsIfStale().catch(() => {});
 
     const result = runtime.content_key(state, key, isEditable(ev.target));
     state = result.state ?? state;

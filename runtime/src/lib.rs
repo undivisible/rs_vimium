@@ -68,7 +68,7 @@ pub fn runtime_version() -> String {
 #[wasm_bindgen]
 pub fn render_popup(_state: JsValue) -> Result<JsValue, JsValue> {
     let mut ctx = TemplateContext::new();
-    ctx.set("title", "vimium-crepus");
+    ctx.set("title", "Vimium");
     ctx.set("status", "Enabled");
     ctx.set("groups", json_to_template(shortcut_groups_json_val()));
     let html = render_component_file_to_html(UI_CREPUS, "Popup", &ctx)
@@ -175,6 +175,20 @@ pub async fn settings_seed() -> Result<JsValue, JsValue> {
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
     }
     to_js(json!({"ok": true}))
+}
+
+#[wasm_bindgen]
+pub fn settings_seed_from_value(settings: JsValue) -> Result<JsValue, JsValue> {
+    let stored = from_js(settings);
+    let mut merged = json!({});
+    if let Ok(mut s) = USER_SETTINGS.lock() {
+        s.merge(stored);
+        if let Ok(mut mappings) = USER_MAPPINGS.lock() {
+            *mappings = COMMAND_REGISTRY.parse_user_mappings(&s.get_str("keyMappings"));
+        }
+        merged = s.settings.clone();
+    }
+    to_js(json!({"ok": true, "settings": merged}))
 }
 
 #[wasm_bindgen]

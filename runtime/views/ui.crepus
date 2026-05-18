@@ -9,12 +9,12 @@ div vc-popup
     for group in {groups}
       div vc-group
         div vc-group-title
-          "{group.name}"
-        for item in {group.items}
+          "{name}"
+        for item in {items}
           div vc-row
             span vc-keys
-              "{item.keys}"
+              "{keys}"
             span vc-label
-              "{item.label}"
+              "{label}"
   div vc-footer
     "Press ? on a page for the in-page help overlay."
