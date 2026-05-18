@@ -1,6 +1,6 @@
 # rs_vimium
 
-The hacker's browser in rust.
+The hacker's browser in rust. Built with [Crepuscularity](https://github.com/tschk/crepuscularity).
 
 ## Build
 
