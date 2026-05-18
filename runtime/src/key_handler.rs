@@ -1,4 +1,4 @@
-use crate::commands::{CommandEntry, KeyMapRegistry};
+use crate::commands::{CommandEntry, KeyMapRegistry, RegistryEntry};
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Default)]
@@ -25,7 +25,8 @@ pub fn handle_key(
     key: &str,
     editable: bool,
     registry: &KeyMapRegistry,
-    user_mappings: &std::collections::HashMap<String, String>,
+    user_mappings: &std::collections::HashMap<String, Option<RegistryEntry>>,
+    pass_keys: &str,
 ) -> Value {
     if key == "Esc" {
         return json!({
@@ -49,6 +50,10 @@ pub fn handle_key(
 
     let mut sequence = state.sequence.clone();
     let mut count_text = state.count_text.clone();
+
+    if is_pass_key(state, key, pass_keys, registry, user_mappings) {
+        return json!({ "state": state_to_val(state), "effect": null, "prevent": false });
+    }
 
     if key.len() == 1
         && key.as_bytes()[0].is_ascii_digit()
@@ -92,11 +97,25 @@ pub fn handle_key(
     }
 }
 
+fn is_pass_key(
+    state: &KeyState,
+    key: &str,
+    pass_keys: &str,
+    registry: &KeyMapRegistry,
+    user_mappings: &std::collections::HashMap<String, Option<RegistryEntry>>,
+) -> bool {
+    !key.is_empty()
+        && !pass_keys.is_empty()
+        && state.count_text.is_empty()
+        && !registry.has_continuation_mapping(&state.sequence, key, user_mappings)
+        && pass_keys.contains(key)
+}
+
 pub fn handle_visual_key(
     state: &KeyState,
     key: &str,
     registry: &KeyMapRegistry,
-    user_mappings: &std::collections::HashMap<String, String>,
+    user_mappings: &std::collections::HashMap<String, Option<RegistryEntry>>,
 ) -> Value {
     let mut sequence = state.sequence.clone();
     let count_text = state.count_text.clone();
@@ -184,28 +203,42 @@ pub fn command_effect(cmd_name: &str, count: i64, entry: Option<&CommandEntry>) 
     let count = if no_repeat { 1 } else { count };
 
     match cmd_name {
-        "scrollDown" => json!({"kind": "scroll", "x": 0, "y": 80 * count}),
-        "scrollUp" => json!({"kind": "scroll", "x": 0, "y": -80 * count}),
-        "scrollToTop" => json!({"kind": "scroll-top"}),
+        "scrollDown" => json!({"kind": "scroll-step", "axis": "y", "direction": 1, "count": count}),
+        "scrollUp" => json!({"kind": "scroll-step", "axis": "y", "direction": -1, "count": count}),
+        "scrollToTop" => json!({"kind": "scroll-top", "count": count}),
         "scrollToBottom" => json!({"kind": "scroll-bottom"}),
         "scrollPageDown" => json!({"kind": "half-scroll", "direction": 1, "count": count}),
         "scrollPageUp" => json!({"kind": "half-scroll", "direction": -1, "count": count}),
         "scrollFullPageDown" => json!({"kind": "full-scroll", "direction": 1, "count": count}),
         "scrollFullPageUp" => json!({"kind": "full-scroll", "direction": -1, "count": count}),
-        "scrollLeft" => json!({"kind": "scroll", "x": -120 * count, "y": 0}),
-        "scrollRight" => json!({"kind": "scroll", "x": 120 * count, "y": 0}),
+        "scrollLeft" => {
+            json!({"kind": "scroll-step", "axis": "x", "direction": -1, "count": count})
+        }
+        "scrollRight" => {
+            json!({"kind": "scroll-step", "axis": "x", "direction": 1, "count": count})
+        }
         "scrollToLeft" => json!({"kind": "scroll-left"}),
         "scrollToRight" => json!({"kind": "scroll-right"}),
-        "reload" => json!({"kind": "reload"}),
+        "reload" => {
+            let hard = entry
+                .and_then(|entry| entry.options.get("hard"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if bkg {
+                json!({"kind": "background", "command": "reload", "hard": hard})
+            } else {
+                json!({"kind": "reload", "hard": hard})
+            }
+        }
         "copyCurrentUrl" => json!({"kind": "copy-url"}),
         "openCopiedUrlInCurrentTab" => json!({"kind": "open-clipboard", "newTab": false}),
         "openCopiedUrlInNewTab" => json!({"kind": "open-clipboard", "newTab": true}),
-        "goUp" => json!({"kind": "go-up"}),
+        "goUp" => json!({"kind": "go-up", "count": count}),
         "goToRoot" => json!({"kind": "go-root"}),
         "enterInsertMode" => json!({"kind": "insert-mode"}),
         "enterVisualMode" => json!({"kind": "enter-visual", "mode": "visual"}),
         "enterVisualLineMode" => json!({"kind": "enter-visual", "mode": "visual-line"}),
-        "focusInput" => json!({"kind": "focus-input"}),
+        "focusInput" => json!({"kind": "focus-input", "count": count}),
         "LinkHints.activateModeToOpenInNewTab" => {
             json!({"kind": "hints", "newTab": true, "foreground": false})
         }
@@ -293,6 +326,28 @@ fn visual_effect(cmd_name: &str, _count: i64, _entry: Option<&CommandEntry>) -> 
     }
 }
 
+pub fn go_up_url(url: &str, count: i64) -> Option<String> {
+    let count = count.max(1) as usize;
+    let trimmed = url.strip_suffix('/').unwrap_or(url);
+    let mut parts = trimmed.split('/').collect::<Vec<_>>();
+    if parts.len() <= 3 {
+        return None;
+    }
+    let keep = parts.len().saturating_sub(count).max(3);
+    parts.truncate(keep);
+    Some(parts.join("/"))
+}
+
+pub fn root_url(url: &str) -> Option<String> {
+    let scheme_end = url.find("://")?;
+    let after_scheme = scheme_end + 3;
+    let host_end = url[after_scheme..]
+        .find('/')
+        .map(|idx| after_scheme + idx)
+        .unwrap_or(url.len());
+    Some(url[..host_end].to_string())
+}
+
 pub fn effect_mode(effect: &Value) -> String {
     match effect.get("kind").and_then(Value::as_str).unwrap_or("") {
         "hints" | "hints-general" | "hints-queue" | "hints-download" | "hints-incognito"
@@ -319,5 +374,91 @@ pub fn key_name(event_key: &str) -> String {
         "\n" => "enter".to_string(),
         _ if event_key.len() == 1 => event_key.to_string(),
         _ => event_key.to_string().to_lowercase(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scroll_step_effects_defer_to_runtime_setting() {
+        assert_eq!(
+            command_effect("scrollDown", 3, None),
+            json!({"kind": "scroll-step", "axis": "y", "direction": 1, "count": 3})
+        );
+        assert_eq!(
+            command_effect("scrollLeft", 2, None),
+            json!({"kind": "scroll-step", "axis": "x", "direction": -1, "count": 2})
+        );
+    }
+
+    #[test]
+    fn reload_effect_keeps_hard_option_from_registry_entry() {
+        let registry = KeyMapRegistry::from_defaults();
+        let entry = registry.key_to_registry.get("R");
+        assert_eq!(
+            command_effect("reload", 1, entry),
+            json!({"kind": "background", "command": "reload", "hard": true})
+        );
+    }
+
+    #[test]
+    fn pass_keys_are_passed_only_at_root_without_count_prefix() {
+        let registry = KeyMapRegistry::from_defaults();
+        let mappings = std::collections::HashMap::new();
+        let state = KeyState::new();
+        let result = handle_key(&state, "j", false, &registry, &mappings, "j");
+        assert_eq!(Some(false), result.get("prevent").and_then(Value::as_bool));
+        assert!(result.get("effect").is_some_and(Value::is_null));
+
+        let mut state = KeyState::new();
+        state.count_text = "2".to_string();
+        let result = handle_key(&state, "j", false, &registry, &mappings, "j");
+        assert_eq!(Some(true), result.get("prevent").and_then(Value::as_bool));
+        assert_eq!(
+            Some("scroll-step"),
+            result
+                .get("effect")
+                .and_then(|effect| effect.get("kind"))
+                .and_then(Value::as_str)
+        );
+
+        let mut state = KeyState::new();
+        state.sequence = "g".to_string();
+        let result = handle_key(&state, "t", false, &registry, &mappings, "t");
+        assert_eq!(Some(true), result.get("prevent").and_then(Value::as_bool));
+        assert_eq!(
+            Some("background"),
+            result
+                .get("effect")
+                .and_then(|effect| effect.get("kind"))
+                .and_then(Value::as_str)
+        );
+    }
+
+    #[test]
+    fn go_up_url_matches_vimium_path_hierarchy() {
+        assert_eq!(
+            go_up_url("https://example.com/a/b/c", 1).as_deref(),
+            Some("https://example.com/a/b")
+        );
+        assert_eq!(
+            go_up_url("https://example.com/a/b/c/", 2).as_deref(),
+            Some("https://example.com/a")
+        );
+        assert_eq!(go_up_url("https://example.com", 1), None);
+    }
+
+    #[test]
+    fn root_url_preserves_origin() {
+        assert_eq!(
+            root_url("https://example.com/a/b?x=1").as_deref(),
+            Some("https://example.com")
+        );
+        assert_eq!(
+            root_url("http://example.com:8080/a").as_deref(),
+            Some("http://example.com:8080")
+        );
     }
 }

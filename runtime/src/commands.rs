@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CommandEntry {
     pub name: String,
     pub desc: String,
@@ -947,6 +947,7 @@ pub struct KeyMapping {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ParsedKeyMappings {
     pub key_to_command: HashMap<String, String>,
+    pub key_to_registry: HashMap<String, Option<RegistryEntry>>,
     pub key_to_mapped_key: HashMap<String, String>,
     pub validation_errors: Vec<String>,
 }
@@ -974,26 +975,47 @@ impl KeyMapRegistry {
         }
 
         let defaults = default_key_bindings();
-        for (key_seq, cmd_name) in &defaults {
+        for (key_seq, cmd_name, options) in &defaults {
             let joined = key_seq.join("");
             registry
                 .key_to_command
                 .insert(joined.clone(), cmd_name.clone());
             if let Some(entry) = registry.commands_by_name.get(cmd_name) {
-                registry.key_to_registry.insert(joined, entry.clone());
+                let mut entry = entry.clone();
+                entry.options = options.clone();
+                registry.key_to_registry.insert(joined, entry);
             }
         }
 
         registry
     }
 
-    pub fn parse_user_mappings(&self, config_text: &str) -> HashMap<String, String> {
-        self.parse_key_mappings(config_text).key_to_command
+    pub fn parse_user_mappings(&self, config_text: &str) -> HashMap<String, Option<RegistryEntry>> {
+        self.parse_key_mappings(config_text).key_to_registry
     }
 
     pub fn parse_key_mappings(&self, config_text: &str) -> ParsedKeyMappings {
-        let mut parsed = ParsedKeyMappings::default();
+        self.parse_key_mappings_from(config_text, ParsedKeyMappings::default())
+    }
 
+    pub fn parse_effective_key_mappings(&self, config_text: &str) -> ParsedKeyMappings {
+        let mut parsed = ParsedKeyMappings::default();
+        for (key, command) in &self.key_to_command {
+            parsed.key_to_command.insert(key.clone(), command.clone());
+        }
+        for (key, entry) in &self.key_to_registry {
+            parsed
+                .key_to_registry
+                .insert(key.clone(), Some(entry.clone()));
+        }
+        self.parse_key_mappings_from(config_text, parsed)
+    }
+
+    fn parse_key_mappings_from(
+        &self,
+        config_text: &str,
+        mut parsed: ParsedKeyMappings,
+    ) -> ParsedKeyMappings {
         for line in parse_lines(config_text) {
             let tokens: Vec<&str> = line.split_whitespace().collect();
             let action = tokens[0].to_lowercase();
@@ -1007,8 +1029,17 @@ impl KeyMapRegistry {
                     }
                     let key_seq = parse_key_sequence(tokens[1]).join("");
                     let cmd_name = tokens[2].to_string();
-                    if self.commands_by_name.contains_key(&cmd_name) {
-                        parsed.key_to_command.insert(key_seq, cmd_name);
+                    if let Some(command_info) = self.commands_by_name.get(&cmd_name) {
+                        let option_string = command_options_text(&line);
+                        let options = parse_command_options(&option_string);
+                        if let Some(error) = validate_command_options(command_info, &options) {
+                            parsed.validation_errors.push(error);
+                            continue;
+                        }
+                        let mut registry_entry = command_info.clone();
+                        registry_entry.options = options;
+                        parsed.key_to_command.insert(key_seq.clone(), cmd_name);
+                        parsed.key_to_registry.insert(key_seq, Some(registry_entry));
                     } else {
                         parsed.validation_errors.push(format!(
                             "{cmd_name} is not a valid command in the line: {line}"
@@ -1024,10 +1055,12 @@ impl KeyMapRegistry {
                     }
                     let key_seq = parse_key_sequence(tokens[1]).join("");
                     parsed.key_to_command.insert(key_seq.clone(), String::new());
+                    parsed.key_to_registry.insert(key_seq.clone(), None);
                     parsed.key_to_mapped_key.remove(&key_seq);
                 }
                 "unmapall" => {
                     parsed.key_to_command.clear();
+                    parsed.key_to_registry.clear();
                     parsed.key_to_mapped_key.clear();
                 }
                 "mapkey" => {
@@ -1063,24 +1096,27 @@ impl KeyMapRegistry {
     pub fn resolve_command<'a>(
         &'a self,
         sequence: &str,
-        user_mappings: &'a HashMap<String, String>,
+        user_mappings: &'a HashMap<String, Option<RegistryEntry>>,
     ) -> Option<(&'a str, Option<&'a RegistryEntry>)> {
         if let Some(cmd_override) = user_mappings.get(sequence) {
-            if cmd_override.is_empty() {
+            let Some(entry) = cmd_override else {
                 return None;
-            }
-            let entry = self.commands_by_name.get(cmd_override);
-            return Some((cmd_override.as_str(), entry));
+            };
+            return Some((entry.name.as_str(), Some(entry)));
         }
         if let Some(cmd_name) = self.key_to_command.get(sequence) {
-            let entry = self.commands_by_name.get(cmd_name);
+            let entry = self.key_to_registry.get(sequence);
             return Some((cmd_name.as_str(), entry));
         }
         None
     }
 
-    pub fn is_prefix(&self, sequence: &str, user_mappings: &HashMap<String, String>) -> bool {
-        if user_mappings.get(sequence).is_some_and(String::is_empty) {
+    pub fn is_prefix(
+        &self,
+        sequence: &str,
+        user_mappings: &HashMap<String, Option<RegistryEntry>>,
+    ) -> bool {
+        if user_mappings.get(sequence).is_some_and(Option::is_none) {
             return false;
         }
         for key in self.key_to_command.keys() {
@@ -1088,12 +1124,63 @@ impl KeyMapRegistry {
                 return true;
             }
         }
-        for key in user_mappings.keys() {
-            if key.starts_with(sequence) && key != sequence && !user_mappings[key].is_empty() {
+        for (key, entry) in user_mappings {
+            if key.starts_with(sequence) && key != sequence && entry.is_some() {
                 return true;
             }
         }
         false
+    }
+
+    pub fn has_continuation_mapping(
+        &self,
+        sequence: &str,
+        key: &str,
+        user_mappings: &HashMap<String, Option<RegistryEntry>>,
+    ) -> bool {
+        if sequence.is_empty() {
+            return false;
+        }
+        let candidate = format!("{sequence}{key}");
+        self.resolve_command(&candidate, user_mappings).is_some()
+            || self.is_prefix(&candidate, user_mappings)
+    }
+
+    pub fn session_metadata(&self, config_text: &str) -> Value {
+        let parsed = self.parse_effective_key_mappings(config_text);
+        let pass_next_key_keys = parsed
+            .key_to_registry
+            .iter()
+            .filter_map(|(key, entry)| {
+                let entry = entry.as_ref()?;
+                (entry.name == "passNextKey" && key.len() > 1).then(|| key.clone())
+            })
+            .collect::<Vec<_>>();
+        let mut command_to_options_to_keys = serde_json::Map::new();
+        for (key, entry) in &parsed.key_to_registry {
+            let Some(entry) = entry else {
+                continue;
+            };
+            let option_string = format_option_string(&entry.options);
+            let command_entry = command_to_options_to_keys
+                .entry(entry.name.clone())
+                .or_insert_with(|| json!({}));
+            if let Some(options_map) = command_entry.as_object_mut() {
+                let keys = options_map
+                    .entry(option_string)
+                    .or_insert_with(|| json!([]));
+                if let Some(keys) = keys.as_array_mut() {
+                    keys.push(Value::String(key.clone()));
+                }
+            }
+        }
+        json!({
+            "mapKeyRegistry": parsed.key_to_mapped_key,
+            "normalModeKeyStateMapping": normal_mode_key_state_mapping(&parsed),
+            "useVimLikeEscape": !parsed.key_to_registry.contains_key("<c-[>"),
+            "passNextKeyKeys": pass_next_key_keys,
+            "commandToOptionsToKeys": command_to_options_to_keys
+        })
     }
 }
 
@@ -1104,6 +1191,204 @@ pub fn parse_lines(text: &str) -> Vec<String> {
         .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with('"'))
         .map(ToOwned::to_owned)
         .collect()
+}
+
+fn command_options_text(line: &str) -> String {
+    let mut whitespace_count = 0;
+    let mut in_whitespace = false;
+    for (index, ch) in line.char_indices() {
+        if ch.is_whitespace() && !in_whitespace {
+            whitespace_count += 1;
+            in_whitespace = true;
+            if whitespace_count == 3 {
+                return line[index..].trim().to_string();
+            }
+        } else if !ch.is_whitespace() {
+            in_whitespace = false;
+        }
+    }
+    String::new()
+}
+
+pub fn parse_command_options(mut option_string: &str) -> Value {
+    let mut options = serde_json::Map::new();
+    while !option_string.is_empty() {
+        let trimmed = option_string.trim_start();
+        option_string = trimmed;
+        if option_string.is_empty() {
+            break;
+        }
+        let (key, value, consumed) =
+            if let Some((key, value, consumed)) = parse_quoted_option(option_string) {
+                (key, Value::String(value), consumed)
+            } else if let Some((key, value, consumed)) = parse_unquoted_option(option_string) {
+                (key, Value::String(value), consumed)
+            } else if let Some((key, consumed)) = parse_flag_option(option_string) {
+                (key, Value::Bool(true), consumed)
+            } else {
+                options.insert(option_string.to_string(), Value::Bool(true));
+                break;
+            };
+        options.insert(key, value);
+        option_string = &option_string[consumed..];
+    }
+    if let Some(count) = options.get("count").cloned() {
+        let parsed = match count {
+            Value::String(raw) => raw.parse::<i64>().ok(),
+            Value::Number(raw) => raw.as_i64(),
+            _ => None,
+        };
+        if let Some(count) = parsed {
+            options.insert("count".to_string(), Value::Number(count.into()));
+        } else {
+            options.remove("count");
+        }
+    }
+    Value::Object(options)
+}
+
+fn parse_quoted_option(text: &str) -> Option<(String, String, usize)> {
+    let equals = text.find("=\"")?;
+    let key = &text[..equals];
+    if !is_option_name(key) {
+        return None;
+    }
+    let value_start = equals + 2;
+    let value_end = text[value_start..].find('"')? + value_start;
+    let consumed = value_end + 1;
+    if text[consumed..]
+        .chars()
+        .next()
+        .is_some_and(|ch| !ch.is_whitespace())
+    {
+        return None;
+    }
+    Some((
+        key.to_string(),
+        text[value_start..value_end].to_string(),
+        consumed,
+    ))
+}
+
+fn parse_unquoted_option(text: &str) -> Option<(String, String, usize)> {
+    let token_end = text.find(char::is_whitespace).unwrap_or(text.len());
+    let token = &text[..token_end];
+    let equals = token.find('=')?;
+    let key = &token[..equals];
+    if !is_option_name(key) || token[equals + 1..].is_empty() {
+        return None;
+    }
+    Some((key.to_string(), token[equals + 1..].to_string(), token_end))
+}
+
+fn parse_flag_option(text: &str) -> Option<(String, usize)> {
+    let token_end = text.find(char::is_whitespace).unwrap_or(text.len());
+    let token = &text[..token_end];
+    (!token.is_empty() && !token.contains('"')).then(|| (token.to_string(), token_end))
+}
+
+fn is_option_name(key: &str) -> bool {
+    !key.is_empty() && key.chars().all(|ch| ch.is_ascii_alphabetic())
+}
+
+fn validate_command_options(command_info: &CommandEntry, options: &Value) -> Option<String> {
+    let options = options.as_object()?;
+    let mut allowed = command_info
+        .options
+        .as_object()
+        .map(|map| map.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    if !command_info.no_repeat {
+        allowed.push("count".to_string());
+    }
+    for option in options.keys() {
+        if allowed.iter().any(|allowed| allowed == option) {
+            continue;
+        }
+        if allowed.iter().any(|allowed| allowed == "(any url)") {
+            if option.contains("://") {
+                continue;
+            }
+            return Some(format!(
+                "Command {} does not support option {}. Is this meant to be a valid URL?",
+                command_info.name, option
+            ));
+        }
+        return Some(format!(
+            "Command {} does not support option {}",
+            command_info.name, option
+        ));
+    }
+    None
+}
+
+fn format_option_string(options: &Value) -> String {
+    options
+        .as_object()
+        .map(|map| {
+            map.iter()
+                .map(|(key, value)| {
+                    if value == &Value::Bool(true) {
+                        key.clone()
+                    } else if let Some(value) = value.as_str() {
+                        format!("{key}={value}")
+                    } else {
+                        format!("{key}={value}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default()
+}
+
+fn normal_mode_key_state_mapping(parsed: &ParsedKeyMappings) -> Value {
+    let mut root = serde_json::Map::new();
+    let mut keys = parsed
+        .key_to_registry
+        .keys()
+        .cloned()
+        .collect::<Vec<String>>();
+    keys.sort();
+    for key in keys {
+        let Some(Some(entry)) = parsed.key_to_registry.get(&key) else {
+            continue;
+        };
+        let sequence = parse_key_sequence(&key);
+        insert_key_state_mapping(&mut root, &sequence, entry);
+    }
+    Value::Object(root)
+}
+
+fn insert_key_state_mapping(
+    mapping: &mut serde_json::Map<String, Value>,
+    sequence: &[String],
+    entry: &RegistryEntry,
+) {
+    let Some((key, rest)) = sequence.split_first() else {
+        return;
+    };
+    if rest.is_empty() {
+        mapping.insert(
+            key.clone(),
+            json!({
+                "command": entry.name,
+                "noRepeat": entry.no_repeat,
+                "repeatLimit": entry.repeat_limit,
+                "background": entry.background,
+                "topFrame": entry.top_frame,
+                "options": entry.options
+            }),
+        );
+        return;
+    }
+    let child = mapping.entry(key.clone()).or_insert_with(|| json!({}));
+    if child.get("command").is_some() {
+        return;
+    }
+    if let Some(child) = child.as_object_mut() {
+        insert_key_state_mapping(child, rest, entry);
+    }
 }
 
 pub fn parse_key_sequence(key: &str) -> Vec<String> {
@@ -1173,8 +1458,9 @@ fn is_modified_key(key: &str) -> bool {
             .all(|part| part.len() == 1 && part.chars().all(|ch| ch.is_ascii_alphabetic()))
 }
 
-fn default_key_bindings() -> Vec<(Vec<String>, String)> {
-    let m = |k: &str, c: &str| (parse_key_sequence(k), c.to_string());
+fn default_key_bindings() -> Vec<(Vec<String>, String, Value)> {
+    let m = |k: &str, c: &str| (parse_key_sequence(k), c.to_string(), json!({}));
+    let mo = |k: &str, c: &str, o: Value| (parse_key_sequence(k), c.to_string(), o);
     vec![
         m("?", "showHelp"),
         m("j", "scrollDown"),
@@ -1190,7 +1476,7 @@ fn default_key_bindings() -> Vec<(Vec<String>, String)> {
         m("d", "scrollPageDown"),
         m("u", "scrollPageUp"),
         m("r", "reload"),
-        m("R", "reload"),
+        mo("R", "reload", json!({"hard": true})),
         m("gs", "toggleViewSource"),
         m("i", "enterInsertMode"),
         m("v", "enterVisualMode"),
@@ -1292,6 +1578,14 @@ mod tests {
             Some("zoomReset"),
             registry.key_to_command.get("z0").map(String::as_str)
         );
+        assert_eq!(
+            Some(true),
+            registry
+                .key_to_registry
+                .get("R")
+                .and_then(|entry| entry.options.get("hard"))
+                .and_then(Value::as_bool)
+        );
     }
 
     #[test]
@@ -1312,16 +1606,26 @@ mod tests {
         let parsed = registry.parse_key_mappings(
             r#"
             map a scrollDown
-            map <C-Space> scrollUp
+            map <C-Space> scrollUp count=5
             mapkey x y
             unmap a
             map b scrollToTop
             "#,
         );
         assert_eq!(Some(""), parsed.key_to_command.get("a").map(String::as_str));
+        assert_eq!(Some(None), parsed.key_to_registry.get("a").cloned());
         assert_eq!(
             Some("scrollUp"),
             parsed.key_to_command.get("<c-space>").map(String::as_str)
+        );
+        assert_eq!(
+            Some(5),
+            parsed
+                .key_to_registry
+                .get("<c-space>")
+                .and_then(Option::as_ref)
+                .and_then(|entry| entry.options.get("count"))
+                .and_then(Value::as_i64)
         );
         assert_eq!(
             Some("scrollToTop"),
@@ -1335,9 +1639,50 @@ mod tests {
 
         let parsed = registry.parse_key_mappings("mapkey a b\nunmapall\nmapkey b c");
         assert!(parsed.key_to_command.is_empty());
+        assert!(parsed.key_to_registry.is_empty());
         assert_eq!(
             Some("c"),
             parsed.key_to_mapped_key.get("b").map(String::as_str)
+        );
+    }
+
+    #[test]
+    fn parse_command_options_supports_flags_values_and_urls() {
+        let registry = KeyMapRegistry::from_defaults();
+        let parsed = registry.parse_key_mappings(
+            r#"
+            map a reload hard
+            map b Vomnibar.activate query="two words"
+            map c createTab https://example.com/path
+            "#,
+        );
+        assert!(parsed.validation_errors.is_empty());
+        assert_eq!(
+            Some(true),
+            parsed
+                .key_to_registry
+                .get("a")
+                .and_then(Option::as_ref)
+                .and_then(|entry| entry.options.get("hard"))
+                .and_then(Value::as_bool)
+        );
+        assert_eq!(
+            Some("two words"),
+            parsed
+                .key_to_registry
+                .get("b")
+                .and_then(Option::as_ref)
+                .and_then(|entry| entry.options.get("query"))
+                .and_then(Value::as_str)
+        );
+        assert_eq!(
+            Some(true),
+            parsed
+                .key_to_registry
+                .get("c")
+                .and_then(Option::as_ref)
+                .and_then(|entry| entry.options.get("https://example.com/path"))
+                .and_then(Value::as_bool)
         );
     }
 

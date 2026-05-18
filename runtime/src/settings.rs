@@ -189,12 +189,128 @@ impl UserSettings {
             _ => vec![],
         }
     }
+
+    pub fn enabled_state_for_url(&self, url: &str) -> ExclusionState {
+        enabled_state_for_url(url, &self.parse_exclusion_rules())
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ExclusionRule {
     pub pattern: String,
     pub pass_keys: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExclusionState {
+    pub is_enabled_for_url: bool,
+    pub pass_keys: String,
+}
+
+pub fn enabled_state_for_url(url: &str, rules: &[ExclusionRule]) -> ExclusionState {
+    let matching_rules = rules
+        .iter()
+        .filter(|rule| !rule.pattern.is_empty() && exclusion_pattern_matches(&rule.pattern, url))
+        .collect::<Vec<_>>();
+    for rule in &matching_rules {
+        if rule.pass_keys.is_empty() {
+            return ExclusionState {
+                is_enabled_for_url: false,
+                pass_keys: String::new(),
+            };
+        }
+    }
+    if matching_rules.is_empty() {
+        return ExclusionState {
+            is_enabled_for_url: true,
+            pass_keys: String::new(),
+        };
+    }
+    let pass_keys = distinct_characters(
+        &matching_rules
+            .iter()
+            .flat_map(|rule| rule.pass_keys.split_whitespace())
+            .collect::<String>(),
+    );
+    ExclusionState {
+        is_enabled_for_url: !pass_keys.is_empty(),
+        pass_keys,
+    }
+}
+
+fn distinct_characters(text: &str) -> String {
+    let mut seen = Vec::new();
+    let mut result = String::new();
+    for ch in text.chars() {
+        if !seen.contains(&ch) {
+            seen.push(ch);
+            result.push(ch);
+        }
+    }
+    result
+}
+
+fn exclusion_pattern_matches(pattern: &str, url: &str) -> bool {
+    #[derive(Clone, Copy)]
+    enum Token {
+        Literal(char),
+        Optional(char),
+        Any,
+    }
+
+    let chars = pattern.chars().collect::<Vec<_>>();
+    let mut tokens = Vec::new();
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch == '*' {
+            tokens.push(Token::Any);
+            index += 1;
+        } else if chars.get(index + 1) == Some(&'?') {
+            tokens.push(Token::Optional(ch));
+            index += 2;
+        } else if ch == '?' {
+            return false;
+        } else {
+            tokens.push(Token::Literal(ch));
+            index += 1;
+        }
+    }
+
+    let url_chars = url.chars().collect::<Vec<_>>();
+    let mut current = vec![false; url_chars.len() + 1];
+    current[0] = true;
+    for token in tokens {
+        let mut next = vec![false; url_chars.len() + 1];
+        match token {
+            Token::Literal(expected) => {
+                for pos in 0..url_chars.len() {
+                    if current[pos] && url_chars[pos] == expected {
+                        next[pos + 1] = true;
+                    }
+                }
+            }
+            Token::Optional(expected) => {
+                for pos in 0..=url_chars.len() {
+                    if current[pos] {
+                        next[pos] = true;
+                        if pos < url_chars.len() && url_chars[pos] == expected {
+                            next[pos + 1] = true;
+                        }
+                    }
+                }
+            }
+            Token::Any => {
+                let mut reachable = false;
+                for pos in 0..=url_chars.len() {
+                    reachable |= current[pos];
+                    next[pos] = reachable;
+                }
+            }
+        }
+        current = next;
+    }
+    current[url_chars.len()]
 }
 
 pub fn prune_defaults(settings: &Value) -> Value {
@@ -453,5 +569,71 @@ mod tests {
             "newTabCustomUrl": "https://example.com"
         }));
         assert_eq!("https://example.com", settings.new_tab_url());
+    }
+
+    #[test]
+    fn exclusion_rules_disable_or_pass_distinct_keys() {
+        let rules = vec![
+            ExclusionRule {
+                pattern: "http*://mail.google.com/*".to_string(),
+                pass_keys: String::new(),
+            },
+            ExclusionRule {
+                pattern: "http*://www.facebook.com/*".to_string(),
+                pass_keys: "abab".to_string(),
+            },
+            ExclusionRule {
+                pattern: "http*://www.facebook.com/*".to_string(),
+                pass_keys: "cdcd".to_string(),
+            },
+            ExclusionRule {
+                pattern: "http*://www.example.com/*".to_string(),
+                pass_keys: "a bb c bba a".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            ExclusionState {
+                is_enabled_for_url: false,
+                pass_keys: String::new()
+            },
+            enabled_state_for_url("https://mail.google.com/mail/u/0", &rules)
+        );
+        assert_eq!(
+            ExclusionState {
+                is_enabled_for_url: true,
+                pass_keys: "abcd".to_string()
+            },
+            enabled_state_for_url("https://www.facebook.com/something", &rules)
+        );
+        assert_eq!(
+            ExclusionState {
+                is_enabled_for_url: true,
+                pass_keys: "abc".to_string()
+            },
+            enabled_state_for_url("http://www.example.com/pages", &rules)
+        );
+        assert_eq!(
+            ExclusionState {
+                is_enabled_for_url: true,
+                pass_keys: String::new()
+            },
+            enabled_state_for_url("http://www.twitter.com/pages", &rules)
+        );
+    }
+
+    #[test]
+    fn malformed_exclusion_patterns_do_not_disable_pages() {
+        let rules = vec![ExclusionRule {
+            pattern: "http*://www.bad-regexp.com/*[a-".to_string(),
+            pass_keys: String::new(),
+        }];
+        assert_eq!(
+            ExclusionState {
+                is_enabled_for_url: true,
+                pass_keys: String::new()
+            },
+            enabled_state_for_url("http://www.bad-regexp.com/pages", &rules)
+        );
     }
 }
