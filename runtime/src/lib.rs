@@ -3156,9 +3156,42 @@ fn setup_new_tab(document: &Document, window: &Window) {
     let _ = input_el.set_attribute("placeholder", "Search DuckDuckGo or enter a URL");
     let _ = input_el.focus();
 
+    fn resolve_bang(query: &str) -> Option<String> {
+        let trimmed = query.trim();
+        if !trimmed.starts_with('!') { return None; }
+        let (bang, rest) = trimmed.split_once(char::is_whitespace)?;
+        let q = rest.trim();
+        let encoded = js_sys::encode_uri_component(q);
+        let url = match bang {
+            "!g" | "!google" => format!("https://www.google.com/search?q={encoded}"),
+            "!w" | "!wiki" => format!("https://en.wikipedia.org/w/index.php?search={encoded}"),
+            "!yt" | "!youtube" => format!("https://www.youtube.com/results?search_query={encoded}"),
+            "!gh" | "!github" => format!("https://github.com/search?q={encoded}"),
+            "!a" | "!amazon" => format!("https://www.amazon.com/s?k={encoded}"),
+            "!r" | "!reddit" => format!("https://www.reddit.com/search/?q={encoded}"),
+            "!so" => format!("https://stackoverflow.com/search?q={encoded}"),
+            "!m" | "!maps" => format!("https://www.google.com/maps?q={encoded}"),
+            "!im" | "!images" => format!("https://www.google.com/search?tbm=isch&q={encoded}"),
+            "!n" | "!news" => format!("https://news.google.com/search?q={encoded}"),
+            "!docs" => format!("https://docs.rs/releases/search?query={encoded}"),
+            "!crates" => format!("https://crates.io/search?q={encoded}"),
+            "!npm" => format!("https://www.npmjs.com/search?q={encoded}"),
+            "!ddg" | "!duck" => format!("https://duckduckgo.com/?q={encoded}"),
+            "!tr" | "!translate" => format!("https://translate.google.com/?text={encoded}"),
+            "!tw" | "!twitter" => format!("https://x.com/search?q={encoded}"),
+            "!wa" => format!("https://www.wolframalpha.com/input?i={encoded}"),
+            "!aur" => format!("https://aur.archlinux.org/packages?K={encoded}"),
+            "!def" => format!("https://www.merriam-webster.com/dictionary/{encoded}"),
+            "!ud" => format!("https://www.urbandictionary.com/define.php?term={encoded}"),
+            _ => format!("https://duckduckgo.com/?q={}", js_sys::encode_uri_component(trimmed)),
+        };
+        Some(url)
+    }
+
     fn resolve_url(q: &str) -> String {
         let trimmed = q.trim();
         if trimmed.is_empty() { return "https://duckduckgo.com/".into(); }
+        if let Some(url) = resolve_bang(trimmed) { return url; }
         if trimmed.starts_with("http://") || trimmed.starts_with("https://")
             || trimmed.starts_with("about:") || trimmed.starts_with("file://")
             || trimmed.starts_with("chrome://")
