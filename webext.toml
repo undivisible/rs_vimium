@@ -29,12 +29,6 @@ run_at = "document_start"
 all_frames = true
 match_about_blank = true
 
-[[content_scripts]]
-matches = ["file:///*"]
-css = ["src/file_urls.css"]
-run_at = "document_start"
-all_frames = true
-
 [options]
 icons = { "16" = "icons/icon16.png", "48" = "icons/icon48.png", "128" = "icons/icon128.png" }
 action_icons = { "16" = "icons/action_disabled_16.png", "32" = "icons/action_disabled_32.png" }
