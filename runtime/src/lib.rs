@@ -3153,8 +3153,23 @@ fn setup_new_tab(document: &Document, window: &Window) {
     let Some(input) = document.get_element_by_id("q") else { return };
     let Some(input_el) = input.dyn_ref::<HtmlInputElement>() else { return };
 
-    let _ = input_el.set_attribute("placeholder", "Search DuckDuckGo...");
+    let _ = input_el.set_attribute("placeholder", "Search DuckDuckGo or enter a URL");
     let _ = input_el.focus();
+
+    fn resolve_url(q: &str) -> String {
+        let trimmed = q.trim();
+        if trimmed.is_empty() { return "https://duckduckgo.com/".into(); }
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://")
+            || trimmed.starts_with("about:") || trimmed.starts_with("file://")
+            || trimmed.starts_with("chrome://")
+        {
+            return trimmed.into();
+        }
+        if trimmed.contains('.') && !trimmed.contains(' ') {
+            return format!("https://{trimmed}");
+        }
+        format!("https://duckduckgo.com/?q={}", js_sys::encode_uri_component(trimmed))
+    }
 
     let input2 = input_el.clone();
     let win2 = window.clone();
@@ -3163,7 +3178,7 @@ fn setup_new_tab(document: &Document, window: &Window) {
             ev.prevent_default();
             let q = input2.value().trim().to_string();
             if !q.is_empty() {
-                let url = format!("https://duckduckgo.com/?q={}", js_sys::encode_uri_component(&q));
+                let url = resolve_url(&q);
                 let _ = win2.location().set_href(&url);
             }
         }));
