@@ -1,39 +1,39 @@
 --- Settings
-div flex flex-col gap-3 p-4
+div flex flex-col gap-3 p-4 bg-white dark:bg-[#1a1a1a] text-black dark:text-[#e0e0e0]
   div flex items-center justify-between
     div text-sm font-bold
       "rs_vimium"
-    div text-[10px] text-black/60
+    div text-[10px] text-black/60 dark:text-white/60
       "Keyboard navigation"
-  div flex items-center justify-between px-3 py-2.5 border border-black
+  div flex items-center justify-between px-3 py-2.5 border border-black dark:border-[#555]
     div text-xs
       "Enabled"
-    input #enabled type="checkbox" accent-[#000]
-  div flex items-center justify-between px-3 py-2.5 border border-black
+    input #enabled type="checkbox" class="accent-[#000] dark:accent-[#e0e0e0]"
+  div flex items-center justify-between px-3 py-2.5 border border-black dark:border-[#555]
     div text-xs
       "Custom new tab"
-    input #useCustomNewTab type="checkbox" accent-[#000]
-  div text-[10px] text-black/50 text-center mt-2
+    input #useCustomNewTab type="checkbox" class="accent-[#000] dark:accent-[#e0e0e0]"
+  div text-[10px] text-black/50 dark:text-white/50 text-center mt-2
     span data-action="show-shortcuts" cursor-pointer underline
       "Show keyboard shortcuts"
 
 --- Popup
-div flex flex-col bg-white
-  div flex items-center justify-between gap-3 px-3 py-2.5 border-b border-black
+div flex flex-col bg-white dark:bg-[#1a1a1a] text-black dark:text-[#e0e0e0]
+  div flex items-center justify-between gap-3 px-3 py-2.5 border-b border-black dark:border-[#555]
     h1 m-0 text-sm leading-none font-bold tracking-normal
       "{title}"
-    div text-[10px] text-black whitespace-nowrap
+    div text-[10px] text-black dark:text-[#e0e0e0] whitespace-nowrap
       "{status}"
   div grid
     for group in {groups}
-      div border-0 border-b border-black bg-white overflow-hidden
-        div px-2.5 py-[7px] text-[10px] font-bold uppercase text-black border-b border-black
+      div border-0 border-b border-black dark:border-[#555] bg-white dark:bg-[#1a1a1a] overflow-hidden
+        div px-2.5 py-[7px] text-[10px] font-bold uppercase text-black dark:text-[#e0e0e0] border-b border-black dark:border-[#555]
           "{name}"
         for item in {items}
-          div grid grid-cols-[70px,1fr] gap-2.5 items-center px-2.5 py-1.5 border-b border-[#e5e5e5] last:border-b-0
-            span text-[10px] text-white bg-black px-1.5 py-[3px] text-center
+          div grid grid-cols-[70px,1fr] gap-2.5 items-center px-2.5 py-1.5 border-b border-[#e5e5e5] dark:border-[#333] last:border-b-0
+            span text-[10px] text-white dark:text-[#1a1a1a] bg-black dark:bg-[#e0e0e0] px-1.5 py-[3px] text-center
               "{keys}"
-            span text-[11px] text-black leading-[1.35]
+            span text-[11px] text-black dark:text-[#e0e0e0] leading-[1.35]
               "{label}"
-  div text-[10px] leading-[1.4] text-black px-3 py-2.5
+  div text-[10px] leading-[1.4] text-black dark:text-[#e0e0e0] px-3 py-2.5
     "Press ? on a page for the in-page help overlay."
