@@ -30,6 +30,8 @@ impl NewTabDestination {
 
 pub fn default_settings() -> Value {
     json!({
+        "enabled": true,
+        "useCustomNewTab": true,
         "scrollStepSize": 60,
         "smoothScroll": true,
         "keyMappings": "# Insert your preferred key mappings here.",

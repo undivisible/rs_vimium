@@ -1,3 +1,22 @@
+--- Settings
+div flex flex-col gap-3 p-4
+  div flex items-center justify-between
+    div text-sm font-bold
+      "rs_vimium"
+    div text-[10px] text-black/60
+      "Keyboard navigation"
+  div flex items-center justify-between px-3 py-2.5 border border-black
+    div text-xs
+      "Enabled"
+    input #enabled type="checkbox" accent-[#000]
+  div flex items-center justify-between px-3 py-2.5 border border-black
+    div text-xs
+      "Custom new tab"
+    input #useCustomNewTab type="checkbox" accent-[#000]
+  div text-[10px] text-black/50 text-center mt-2
+    span data-action="show-shortcuts" cursor-pointer underline
+      "Show keyboard shortcuts"
+
 --- Popup
 div flex flex-col bg-white
   div flex items-center justify-between gap-3 px-3 py-2.5 border-b border-black

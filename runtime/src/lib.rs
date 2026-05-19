@@ -79,6 +79,11 @@ pub fn render_popup(_state: JsValue) -> Result<JsValue, JsValue> {
     to_js(json!({"html": html, "css": POPUP_CSS}))
 }
 
+fn render_settings_html() -> String {
+    render_component_file_to_html(UI_CREPUS, "Settings", &TemplateContext::new())
+        .unwrap_or_default()
+}
+
 #[wasm_bindgen]
 pub fn shortcut_groups_json() -> Result<JsValue, JsValue> {
     to_js(shortcut_groups_json_val())
@@ -3037,42 +3042,115 @@ pub fn options_main() {
 
 #[wasm_bindgen]
 pub fn popup_main() {
-    if let Ok(output) = render_popup(JsValue::NULL) {
-        let value = from_js(output);
-        if let Some(css) = value.get("css").and_then(Value::as_str) {
-            if let Some(document) = doc() {
-                if let Ok(style) = document.create_element("style") {
-                    style.set_text_content(Some(css));
-                    if let Some(head) = document.head() {
-                        let _ = head.append_child(&style);
+    use web_sys::HtmlInputElement;
+
+    let Some(document) = doc() else { return };
+    let Some(root) = document.get_element_by_id("root") else { return };
+
+    // inject unocss
+    if let Ok(script) = document.create_element("script") {
+        let _ = script.set_attribute("src", "../vendor/unocss.js");
+        if let Some(head) = document.head() {
+            let _ = head.append_child(&script);
+        }
+    }
+
+    // inject minimal body style
+    if let Ok(style) = document.create_element("style") {
+        style.set_text_content(Some("body{margin:0;min-width:320px;font-family:\"JetBrains Mono\",ui-monospace,SFMono-Regular,Consolas,monospace}"));
+        if let Some(head) = document.head() {
+            let _ = head.append_child(&style);
+        }
+    }
+
+    // render settings
+    let html = render_settings_html();
+    root.set_inner_html(&html);
+
+    // load settings and patch checkboxes
+    let doc_for_load = document.clone();
+    spawn_local(async move {
+        if let Ok(resp) = settings_get().await {
+            let settings = from_js(resp).get("settings").cloned().unwrap_or_default();
+            if let Some(el) = doc_for_load.get_element_by_id("enabled") {
+                if let Some(cb) = el.dyn_ref::<HtmlInputElement>() {
+                    cb.set_checked(settings.get("enabled").and_then(Value::as_bool).unwrap_or(true));
+                }
+            }
+            if let Some(el) = doc_for_load.get_element_by_id("useCustomNewTab") {
+                if let Some(cb) = el.dyn_ref::<HtmlInputElement>() {
+                    cb.set_checked(settings.get("useCustomNewTab").and_then(Value::as_bool).unwrap_or(true));
+                }
+            }
+        }
+    });
+
+    // bind toggle handlers
+    let doc2 = document.clone();
+    let closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
+        let Some(target) = ev.target() else { return };
+        let Some(el) = target.dyn_ref::<web_sys::Element>() else { return };
+        let id = el.id();
+        if id == "enabled" || id == "useCustomNewTab" {
+            let Some(cb) = el.dyn_ref::<HtmlInputElement>() else { return };
+            let checked = cb.checked();
+            let val = json!({id: checked});
+            spawn_local(async move {
+                let _ = settings_set(to_js(val).unwrap_or(JsValue::NULL)).await;
+                let _ = notify_settings_changed().await;
+            });
+        }
+        if let Some(action) = el.get_attribute("data-action") {
+            if action == "show-shortcuts" {
+                if let Ok(output) = render_popup(JsValue::NULL) {
+                    let value = from_js(output);
+                    if let Some(html) = value.get("html").and_then(Value::as_str) {
+                        if let Some(r) = doc2.get_element_by_id("root") {
+                            r.set_inner_html(html);
+                        }
                     }
                 }
             }
         }
-        if let Some(html) = value.get("html").and_then(Value::as_str) {
-            if let Some(root) = doc().and_then(|d| d.get_element_by_id("root")) {
-                root.set_inner_html(html);
-            }
-        }
-    }
-    if let Some(document) = doc() {
-        if let Ok(script) = document.create_element("script") {
-            let _ = script.set_attribute("src", "../vendor/unocss.js");
-            let _ = script.set_attribute("defer", "");
-            if let Some(head) = document.head() {
-                let _ = head.append_child(&script);
-            }
-        }
-    }
+    }));
+    let _ = document.add_event_listener_with_callback("change", closure.as_ref().unchecked_ref());
+    let _ = document.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
+    closure.forget();
 }
 
 #[wasm_bindgen]
 pub fn new_tab_main() {
+    let Some(document) = doc() else { return };
+    let Some(window) = win() else { return };
+
+    // inject unocss
+    if let Ok(s) = document.create_element("script") {
+        let _ = s.set_attribute("src", "../vendor/unocss.js");
+        if let Some(head) = document.head() {
+            let _ = head.append_child(&s);
+        }
+    }
+
+    let doc2 = document.clone();
+    let win2 = window.clone();
+    spawn_local(async move {
+        if let Ok(resp) = settings_get().await {
+            let settings = from_js(resp).get("settings").cloned().unwrap_or_default();
+            if !settings.get("useCustomNewTab").and_then(Value::as_bool).unwrap_or(true) {
+                if let Ok(url) = js_sys::JSON::parse("\"chrome://newtab\"") {
+                    let _ = win2.location().set_href(&url.as_string().unwrap_or_default());
+                }
+                return;
+            }
+        }
+        setup_new_tab_search(&doc2, &win2);
+    });
+}
+
+fn setup_new_tab_search(document: &Document, window: &Window) {
     use wasm_bindgen_futures::JsFuture;
     use web_sys::HtmlInputElement;
 
-    let Some(document) = doc() else { return };
-    let Some(window) = win() else { return };
     let Some(input) = document.get_element_by_id("search-input") else { return };
     let Some(input_el) = input.dyn_ref::<HtmlInputElement>() else { return };
     let Some(list) = document.get_element_by_id("suggest-list") else { return };
@@ -3082,7 +3160,7 @@ pub fn new_tab_main() {
 
     let input_clone = input_el.clone();
     let list_clone = list.clone();
-    let win_clone = window.clone();
+    let window_clone = window.clone();
     let closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_ev| {
         let q = input_clone.value();
         if q.trim().is_empty() {
@@ -3090,11 +3168,11 @@ pub fn new_tab_main() {
             return;
         }
         let list2 = list_clone.clone();
-        let win2 = win_clone.clone();
+        let win3 = window_clone.clone();
         spawn_local(async move {
             let url = format!("https://duckduckgo.com/ac/?q={}&type=list", js_sys::encode_uri_component(&q));
             let Ok(req) = web_sys::Request::new_with_str(&url) else { return };
-            let Ok(resp_val) = JsFuture::from(win2.fetch_with_request(&req)).await else { return };
+            let Ok(resp_val) = JsFuture::from(win3.fetch_with_request(&req)).await else { return };
             let Ok(resp) = resp_val.dyn_into::<web_sys::Response>() else { return };
             let Ok(text_promise) = resp.text() else { return };
             let Ok(text_val) = JsFuture::from(text_promise).await else { return };
@@ -3115,12 +3193,13 @@ pub fn new_tab_main() {
 
     let input2 = input_el.clone();
     let form = input_el.form();
+    let window2 = window.clone();
     let closure2 = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
         ev.prevent_default();
         let q = input2.value().trim().to_string();
         if !q.is_empty() {
             let url = format!("https://duckduckgo.com/?q={}", js_sys::encode_uri_component(&q));
-            let _ = window.location().set_href(&url);
+            let _ = window2.location().set_href(&url);
         }
     }));
     if let Some(f) = form {
