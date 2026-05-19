@@ -2,7 +2,6 @@
 name = "rs_vimium"
 version = "1.0.0"
 description = "Vim-style keyboard navigation for the web — Rust + Crepuscularity"
-homepage = "https://github.com/undivisible/rs_vimium"
 minimum_chrome_version = "117.0"
 
 [capabilities]
@@ -14,48 +13,8 @@ history = true
 notifications = true
 clipboard = true
 scripting = true
-web-navigation = true
 search = true
 favicon = true
 background-script = true
 content-script = true
 host-permissions = ["<all_urls>"]
-
-[[content_scripts]]
-matches = ["<all_urls>"]
-js = ["src/content.js"]
-css = ["src/content.css"]
-run_at = "document_start"
-all_frames = true
-match_about_blank = true
-
-[options]
-icons = { "16" = "icons/icon16.png", "48" = "icons/icon48.png", "128" = "icons/icon128.png" }
-action_icons = { "16" = "icons/action_disabled_16.png", "32" = "icons/action_disabled_32.png" }
-action_popup = "pages/popup.crepus"
-background_script = "src/background.js"
-extra_resources = ["resources/tlds.txt", "_favicon/*"]
-
-[options.options_ui]
-page = "pages/options.crepus"
-browser_style = false
-open_in_tab = true
-
-[web_accessible_resources]
-resources = [
-    "vendor/runtime.js",
-    "vendor/runtime_bg.wasm",
-    "resources/tlds.txt",
-    "_favicon/*",
-]
-matches = ["<all_urls>"]
-
-[chrome_url_overrides]
-newtab = "pages/new-tab.crepus"
-
-[commands._execute_action]
-description = "Open rs_vimium popup"
-
-[commands._execute_action.suggested_key]
-default = "Alt+Shift+V"
-mac = "Alt+Shift+V"
