@@ -3143,69 +3143,33 @@ pub fn new_tab_main() {
                 return;
             }
         }
-        setup_new_tab_search(&doc2, &win2);
+        setup_new_tab(&doc2, &win2);
     });
 }
 
-fn setup_new_tab_search(document: &Document, window: &Window) {
-    use wasm_bindgen_futures::JsFuture;
+fn setup_new_tab(document: &Document, window: &Window) {
     use web_sys::HtmlInputElement;
 
-    let Some(input) = document.get_element_by_id("search-input") else { return };
+    let Some(input) = document.get_element_by_id("q") else { return };
     let Some(input_el) = input.dyn_ref::<HtmlInputElement>() else { return };
-    let Some(list) = document.get_element_by_id("suggest-list") else { return };
 
     let _ = input_el.set_attribute("placeholder", "Search DuckDuckGo...");
     let _ = input_el.focus();
 
-    let input_clone = input_el.clone();
-    let list_clone = list.clone();
-    let window_clone = window.clone();
-    let closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_ev| {
-        let q = input_clone.value();
-        if q.trim().is_empty() {
-            list_clone.set_inner_html("");
-            return;
-        }
-        let list2 = list_clone.clone();
-        let win3 = window_clone.clone();
-        spawn_local(async move {
-            let url = format!("https://duckduckgo.com/ac/?q={}&type=list", js_sys::encode_uri_component(&q));
-            let Ok(req) = web_sys::Request::new_with_str(&url) else { return };
-            let Ok(resp_val) = JsFuture::from(win3.fetch_with_request(&req)).await else { return };
-            let Ok(resp) = resp_val.dyn_into::<web_sys::Response>() else { return };
-            let Ok(text_promise) = resp.text() else { return };
-            let Ok(text_val) = JsFuture::from(text_promise).await else { return };
-            let Some(text) = text_val.as_string() else { return };
-            let items: Vec<String> = serde_json::from_str(&text).unwrap_or_default();
-            let mut html = String::new();
-            for item in &items {
-                let safe = item.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-                html.push_str(&format!(
-                    r#"<li class="cursor-pointer px-3 py-2 text-sm text-black border-b border-[#e5e5e5] hover:bg-black hover:text-white" role="option">{safe}</li>"#
-                ));
-            }
-            list2.set_inner_html(&html);
-        });
-    }));
-    let _ = input_el.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
-    closure.forget();
-
     let input2 = input_el.clone();
-    let form = input_el.form();
-    let window2 = window.clone();
-    let closure2 = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
-        ev.prevent_default();
-        let q = input2.value().trim().to_string();
-        if !q.is_empty() {
-            let url = format!("https://duckduckgo.com/?q={}", js_sys::encode_uri_component(&q));
-            let _ = window2.location().set_href(&url);
-        }
-    }));
-    if let Some(f) = form {
-        let _ = f.add_event_listener_with_callback("submit", closure2.as_ref().unchecked_ref());
+    let win2 = window.clone();
+    if let Some(form) = input_el.form() {
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
+            ev.prevent_default();
+            let q = input2.value().trim().to_string();
+            if !q.is_empty() {
+                let url = format!("https://duckduckgo.com/?q={}", js_sys::encode_uri_component(&q));
+                let _ = win2.location().set_href(&url);
+            }
+        }));
+        let _ = form.add_event_listener_with_callback("submit", closure.as_ref().unchecked_ref());
+        closure.forget();
     }
-    closure2.forget();
 }
 
 #[cfg(test)]
