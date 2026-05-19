@@ -743,19 +743,7 @@ pub async fn handle_background_message(message: JsValue) -> Result<JsValue, JsVa
 }
 
 pub const POPUP_CSS: &str = r#"
-body{margin:0;min-width:360px;font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;background:#fff;color:#000}
-.vc-popup{display:flex;flex-direction:column;gap:0;padding:0;background:#fff}
-.vc-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border-bottom:1px solid #000}
-.vc-title{margin:0;font-size:14px;line-height:1;font-weight:700;letter-spacing:0}
-.vc-status{font-size:10px;color:#000;white-space:nowrap}
-.vc-grid{display:grid;grid-template-columns:1fr;gap:0}
-.vc-group{border:0;border-bottom:1px solid #000;background:#fff;overflow:hidden}
-.vc-group-title{padding:7px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#000;border-bottom:1px solid #000}
-.vc-row{display:grid;grid-template-columns:70px 1fr;gap:10px;align-items:center;padding:6px 10px;border-bottom:1px solid #e5e5e5}
-.vc-row:last-child{border-bottom:0}
-.vc-keys{font-size:10px;color:#fff;background:#000;padding:3px 5px;text-align:center}
-.vc-label{font-size:11px;color:#000;line-height:1.35}
-.vc-footer{font-size:10px;line-height:1.4;color:#000;padding:10px 12px}
+body{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace}
 "#;
 use std::cell::RefCell;
 use wasm_bindgen::JsCast;
@@ -3067,6 +3055,78 @@ pub fn popup_main() {
             }
         }
     }
+    if let Some(document) = doc() {
+        if let Ok(script) = document.create_element("script") {
+            let _ = script.set_attribute("src", "../vendor/unocss.js");
+            let _ = script.set_attribute("defer", "");
+            if let Some(head) = document.head() {
+                let _ = head.append_child(&script);
+            }
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub fn new_tab_main() {
+    use wasm_bindgen_futures::JsFuture;
+    use web_sys::HtmlInputElement;
+
+    let Some(document) = doc() else { return };
+    let Some(window) = win() else { return };
+    let Some(input) = document.get_element_by_id("search-input") else { return };
+    let Some(input_el) = input.dyn_ref::<HtmlInputElement>() else { return };
+    let Some(list) = document.get_element_by_id("suggest-list") else { return };
+
+    let _ = input_el.set_attribute("placeholder", "Search DuckDuckGo...");
+    let _ = input_el.focus();
+
+    let input_clone = input_el.clone();
+    let list_clone = list.clone();
+    let win_clone = window.clone();
+    let closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_ev| {
+        let q = input_clone.value();
+        if q.trim().is_empty() {
+            list_clone.set_inner_html("");
+            return;
+        }
+        let list2 = list_clone.clone();
+        let win2 = win_clone.clone();
+        spawn_local(async move {
+            let url = format!("https://duckduckgo.com/ac/?q={}&type=list", js_sys::encode_uri_component(&q));
+            let Ok(req) = web_sys::Request::new_with_str(&url) else { return };
+            let Ok(resp_val) = JsFuture::from(win2.fetch_with_request(&req)).await else { return };
+            let Ok(resp) = resp_val.dyn_into::<web_sys::Response>() else { return };
+            let Ok(text_promise) = resp.text() else { return };
+            let Ok(text_val) = JsFuture::from(text_promise).await else { return };
+            let Some(text) = text_val.as_string() else { return };
+            let items: Vec<String> = serde_json::from_str(&text).unwrap_or_default();
+            let mut html = String::new();
+            for item in &items {
+                let safe = item.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+                html.push_str(&format!(
+                    r#"<li class="cursor-pointer px-3 py-2 text-sm text-black border-b border-[#e5e5e5] hover:bg-black hover:text-white" role="option">{safe}</li>"#
+                ));
+            }
+            list2.set_inner_html(&html);
+        });
+    }));
+    let _ = input_el.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
+    closure.forget();
+
+    let input2 = input_el.clone();
+    let form = input_el.form();
+    let closure2 = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
+        ev.prevent_default();
+        let q = input2.value().trim().to_string();
+        if !q.is_empty() {
+            let url = format!("https://duckduckgo.com/?q={}", js_sys::encode_uri_component(&q));
+            let _ = window.location().set_href(&url);
+        }
+    }));
+    if let Some(f) = form {
+        let _ = f.add_event_listener_with_callback("submit", closure2.as_ref().unchecked_ref());
+    }
+    closure2.forget();
 }
 
 #[cfg(test)]

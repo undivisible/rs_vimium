@@ -1,6 +1,6 @@
 # rs_vimium
 
-The hacker's browser in rust. Built with [Crepuscularity](https://github.com/tschk/crepuscularity).
+Vim-style keyboard navigation for the web, written in Rust with [Crepuscularity](https://github.com/semitechnological/crepuscularity).
 
 ## Build
 
@@ -8,21 +8,28 @@ The hacker's browser in rust. Built with [Crepuscularity](https://github.com/tsc
 crepus webext build --app .
 ```
 
-Load `/Users/undivisible/projects/rs_vimium/dist/unpacked` as an unpacked extension.
+Load `dist/unpacked/` as an unpacked extension in `chrome://extensions`.
 
-## Source Layout
+## Layout
 
-- `webext.toml` is the extension manifest source of truth.
-- `runtime/` contains the Rust/WASM runtime.
-- `src/` contains `.css.crepus` style assets rendered by `crepus webext build`.
-- `pages/` contains local extension pages written as `.crepus` templates.
-- `views/` contains Crepuscularity UI templates.
-- `icons/` and `resources/` contain packaged extension assets.
+| Path | Role |
+| --- | --- |
+| `webext.toml` | Extension manifest (capabilities, content scripts, pages) |
+| `runtime/` | Rust/WASM (`popup_main`, `content_main`, `options_main`, `new_tab_main`) |
+| `pages/` | Extension pages (`.crepus` → HTML at build time) |
+| `views/ui.crepus` | In-page UI templates (hints, vomnibar, find bar, help overlay) |
+| `src/content.css.crepus` | Content-script styles (compiled to `src/content.css`) |
+| `resources/tlds.txt` | TLD list for URL detection |
+| `icons/` | Toolbar and extension icons |
+
+## New tab page
+
+With default settings, rs_vimium overrides the browser new-tab page (`chrome_url_overrides.newtab` → `pages/new-tab.html`). Change this under **Options → New tab page**.
 
 ## Upstream
 
-This fork keeps `upstream` pointed at `philc/vimium` for behavior comparison. The maintained Rust rewrite lives at `undivisible/rs_vimium`.
+`upstream` tracks [philc/vimium](https://github.com/philc/vimium) for behavior comparison. This repo is the maintained Rust rewrite.
 
 ## License
 
-MPL-2.0. See `LICENSE`.
+MPL-2.0 — see `LICENSE`.

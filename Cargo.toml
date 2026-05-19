@@ -6,6 +6,12 @@ resolver = "2"
 license = "MPL-2.0"
 repository = "https://github.com/undivisible/rs_vimium"
 
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+
 [workspace.dependencies]
 crepuscularity-core = { path = "../crepuscularity/crates/crepuscularity-core" }
 crepuscularity-web = { path = "../crepuscularity/crates/crepuscularity-web" }
@@ -26,6 +32,7 @@ web-sys = { version = "0.3", features = [
     "Event",
     "EventTarget",
     "History",
+    "HtmlFormElement",
     "HtmlHeadElement",
     "HtmlElement",
     "HtmlInputElement",
@@ -36,6 +43,11 @@ web-sys = { version = "0.3", features = [
     "Node",
     "NodeList",
     "Range",
+    "Request",
+    "RequestInit",
+    "Response",
     "Selection",
+    "Url",
+    "UrlSearchParams",
     "Window",
 ] }

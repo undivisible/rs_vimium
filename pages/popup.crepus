@@ -1,0 +1,2 @@
+div #root
+body{margin:0;min-width:360px;font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace}

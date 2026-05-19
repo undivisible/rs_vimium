@@ -1,34 +1,232 @@
-div
-
-<style>
-.vc-hint{position:absolute;z-index:2147483647;padding:1px 4px;border:1px solid #000;background:#fff;color:#000;font:600 11px/1.25 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:0;pointer-events:none}
-.vc-hint.vc-hint-dim{opacity:.22}
-.vc-hud{position:fixed;z-index:2147483647;left:50%;top:12px;transform:translateX(-50%);padding:4px 10px;border:1px solid #000;background:#fff;color:#000;font:500 12px/1.4 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;white-space:nowrap}
-.vc-overlay{position:fixed;z-index:2147483647;left:50%;top:32px;transform:translateX(-50%);width:min(720px,calc(100vw - 32px));max-height:calc(100vh - 64px);overflow:auto;border:1px solid #000;background:#fff;color:#000;font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace}
-.vc-overlay-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 12px;border-bottom:1px solid #000;font-size:12px;font-weight:600}
-.vc-overlay-close{border:0;background:transparent;color:#000;font:inherit;cursor:pointer}
-.vc-overlay-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0;padding:0}
-.vc-group{border:0;border-bottom:1px solid #000;background:#fff;overflow:hidden;margin:0}
-.vc-group:nth-child(odd){border-right:1px solid #000}
-.vc-group-title{padding:7px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#000;border-bottom:1px solid #000}
-.vc-overlay-row{display:grid;grid-template-columns:72px 1fr;gap:10px;align-items:center;padding:6px 10px;border-bottom:1px solid #e5e5e5}
-.vc-overlay-row:last-child{border-bottom:0}
-.vc-overlay-key{font:600 10px/1.2 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;color:#fff;background:#000;padding:3px 5px;text-align:center}
-.vc-overlay-label{font-size:11px;color:#000}
-.vc-find{position:fixed;z-index:2147483647;left:50%;bottom:20px;transform:translateX(-50%);box-sizing:border-box;width:min(360px,calc(100vw - 24px));display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:1px solid #000;background:#fff;color:#000;font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace}
-.vc-find input{flex:1;min-width:0;border:0;background:transparent;color:#000;font:500 12px/1 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;padding:0;outline:none}
-.vc-find input::placeholder{color:#666}
-.vc-find-count{flex:0 0 auto;min-width:36px;text-align:center;color:#fff;background:#000;font:600 10px/1 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;padding:3px 5px}
-.vc-vomnibar{position:fixed;z-index:2147483647;left:0;top:0;width:100%;height:100%;background:rgba(255,255,255,.86);display:flex;align-items:flex-start;justify-content:center;padding-top:16vh}
-.vc-vomnibar-box{width:min(560px,calc(100vw - 32px));background:#fff;border:1px solid #000;overflow:hidden}
-.vc-vomnibar-input{width:100%;box-sizing:border-box;border:0;border-bottom:1px solid #000;background:#fff;color:#000;font:500 13px/1.4 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;padding:10px 12px;outline:none}
-.vc-vomnibar-input::placeholder{color:#666}
-.vc-vomnibar-list{list-style:none;margin:0;padding:0;max-height:320px;overflow:auto}
-.vc-vomnibar-item{display:flex;align-items:center;gap:10px;padding:7px 12px;cursor:pointer;border-bottom:1px solid #e5e5e5}
-.vc-vomnibar-item:hover,.vc-vomnibar-selected{background:#000;color:#fff}
-.vc-vomnibar-title{font-size:12px;color:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.vc-vomnibar-url{font-size:11px;color:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;opacity:.72}
-::highlight(rs-vimium-find){background:#e5e5e5;color:#000}
-::highlight(rs-vimium-find-active){background:#000;color:#fff}
-@media (max-width:560px){.vc-overlay-grid{grid-template-columns:1fr}.vc-group:nth-child(odd){border-right:0}}
-</style>
+.vc-hint {
+  position: absolute;
+  z-index: 2147483647;
+  padding: 1px 4px;
+  border: 1px solid #000;
+  background: #fff;
+  color: #000;
+  font: 600 11px/1.25 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  letter-spacing: 0;
+  pointer-events: none;
+}
+.vc-hint.vc-hint-dim {
+  opacity: .22;
+}
+.vc-hud {
+  position: fixed;
+  z-index: 2147483647;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border: 1px solid #000;
+  background: #fff;
+  color: #000;
+  font: 500 12px/1.4 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  white-space: nowrap;
+}
+.vc-overlay {
+  position: fixed;
+  z-index: 2147483647;
+  left: 50%;
+  top: 32px;
+  transform: translateX(-50%);
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  border: 1px solid #000;
+  background: #fff;
+  color: #000;
+  font-family: "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+.vc-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #000;
+  font-size: 12px;
+  font-weight: 600;
+}
+.vc-overlay-close {
+  border: 0;
+  background: transparent;
+  color: #000;
+  font: inherit;
+  cursor: pointer;
+}
+.vc-overlay-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
+}
+.vc-group {
+  border: 0;
+  border-bottom: 1px solid #000;
+  background: #fff;
+  overflow: hidden;
+  margin: 0;
+}
+.vc-group:nth-child(odd) {
+  border-right: 1px solid #000;
+}
+.vc-group-title {
+  padding: 7px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #000;
+  border-bottom: 1px solid #000;
+}
+.vc-overlay-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid #e5e5e5;
+}
+.vc-overlay-row:last-child {
+  border-bottom: 0;
+}
+.vc-overlay-key {
+  font: 600 10px/1.2 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  color: #fff;
+  background: #000;
+  padding: 3px 5px;
+  text-align: center;
+}
+.vc-overlay-label {
+  font-size: 11px;
+  color: #000;
+}
+.vc-find {
+  position: fixed;
+  z-index: 2147483647;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 24px));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #000;
+  background: #fff;
+  color: #000;
+  font-family: "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+.vc-find input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #000;
+  font: 500 12px/1 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  padding: 0;
+  outline: none;
+}
+.vc-find input::placeholder {
+  color: #666;
+}
+.vc-find-count {
+  flex: 0 0 auto;
+  min-width: 36px;
+  text-align: center;
+  color: #fff;
+  background: #000;
+  font: 600 10px/1 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  padding: 3px 5px;
+}
+.vc-vomnibar {
+  position: fixed;
+  z-index: 2147483647;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, .86);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 16vh;
+}
+.vc-vomnibar-box {
+  width: min(560px, calc(100vw - 32px));
+  background: #fff;
+  border: 1px solid #000;
+  overflow: hidden;
+}
+.vc-vomnibar-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  border-bottom: 1px solid #000;
+  background: #fff;
+  color: #000;
+  font: 500 13px/1.4 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  padding: 10px 12px;
+  outline: none;
+}
+.vc-vomnibar-input::placeholder {
+  color: #666;
+}
+.vc-vomnibar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow: auto;
+}
+.vc-vomnibar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #e5e5e5;
+}
+.vc-vomnibar-item:hover,
+.vc-vomnibar-selected {
+  background: #000;
+  color: #fff;
+}
+.vc-vomnibar-title {
+  font-size: 12px;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vc-vomnibar-url {
+  font-size: 11px;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  opacity: .72;
+}
+::highlight(rs-vimium-find) {
+  background: #e5e5e5;
+  color: #000;
+}
+::highlight(rs-vimium-find-active) {
+  background: #000;
+  color: #fff;
+}
+.icon.file {
+  -webkit-user-select: auto !important;
+}
+@media (max-width: 560px) {
+  .vc-overlay-grid {
+    grid-template-columns: 1fr;
+  }
+  .vc-group:nth-child(odd) {
+    border-right: 0;
+  }
+}

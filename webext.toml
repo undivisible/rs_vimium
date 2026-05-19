@@ -1,7 +1,7 @@
 [extension]
 name = "rs_vimium"
 version = "1.0.0"
-description = "The hacker's browser in rust"
+description = "Vim-style keyboard navigation for the web — Rust + Crepuscularity"
 homepage = "https://github.com/undivisible/rs_vimium"
 minimum_chrome_version = "117.0"
 
@@ -38,13 +38,12 @@ all_frames = true
 [options]
 icons = { "16" = "icons/icon16.png", "48" = "icons/icon48.png", "128" = "icons/icon128.png" }
 action_icons = { "16" = "icons/action_disabled_16.png", "32" = "icons/action_disabled_32.png" }
-options_page = "pages/options.html"
-action_popup = "pages/action.html"
+action_popup = "pages/popup.crepus"
 background_script = "src/background.js"
-extra_resources = ["_favicon/*"]
+extra_resources = ["resources/tlds.txt", "_favicon/*"]
 
 [options.options_ui]
-page = "pages/options.html"
+page = "pages/options.crepus"
 browser_style = false
 open_in_tab = true
 
@@ -56,6 +55,9 @@ resources = [
     "_favicon/*",
 ]
 matches = ["<all_urls>"]
+
+[chrome_url_overrides]
+newtab = "pages/new-tab.crepus"
 
 [commands._execute_action]
 description = "Open rs_vimium popup"
