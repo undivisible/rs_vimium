@@ -3045,7 +3045,9 @@ pub fn popup_main() {
     use web_sys::HtmlInputElement;
 
     let Some(document) = doc() else { return };
-    let Some(root) = document.get_element_by_id("root") else { return };
+    let Some(root) = document.get_element_by_id("root") else {
+        return;
+    };
 
     // inject unocss
     if let Ok(script) = document.create_element("script") {
@@ -3074,12 +3076,22 @@ pub fn popup_main() {
             let settings = from_js(resp).get("settings").cloned().unwrap_or_default();
             if let Some(el) = doc_for_load.get_element_by_id("enabled") {
                 if let Some(cb) = el.dyn_ref::<HtmlInputElement>() {
-                    cb.set_checked(settings.get("enabled").and_then(Value::as_bool).unwrap_or(true));
+                    cb.set_checked(
+                        settings
+                            .get("enabled")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(true),
+                    );
                 }
             }
             if let Some(el) = doc_for_load.get_element_by_id("useCustomNewTab") {
                 if let Some(cb) = el.dyn_ref::<HtmlInputElement>() {
-                    cb.set_checked(settings.get("useCustomNewTab").and_then(Value::as_bool).unwrap_or(true));
+                    cb.set_checked(
+                        settings
+                            .get("useCustomNewTab")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(true),
+                    );
                 }
             }
         }
@@ -3087,32 +3099,37 @@ pub fn popup_main() {
 
     // bind toggle handlers
     let doc2 = document.clone();
-    let closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
-        let Some(target) = ev.target() else { return };
-        let Some(el) = target.dyn_ref::<web_sys::Element>() else { return };
-        let id = el.id();
-        if id == "enabled" || id == "useCustomNewTab" {
-            let Some(cb) = el.dyn_ref::<HtmlInputElement>() else { return };
-            let checked = cb.checked();
-            let val = json!({id: checked});
-            spawn_local(async move {
-                let _ = settings_set(to_js(val).unwrap_or(JsValue::NULL)).await;
-                let _ = notify_settings_changed().await;
-            });
-        }
-        if let Some(action) = el.get_attribute("data-action") {
-            if action == "show-shortcuts" {
-                if let Ok(output) = render_popup(JsValue::NULL) {
-                    let value = from_js(output);
-                    if let Some(html) = value.get("html").and_then(Value::as_str) {
-                        if let Some(r) = doc2.get_element_by_id("root") {
-                            r.set_inner_html(html);
+    let closure =
+        Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
+            let Some(target) = ev.target() else { return };
+            let Some(el) = target.dyn_ref::<web_sys::Element>() else {
+                return;
+            };
+            let id = el.id();
+            if id == "enabled" || id == "useCustomNewTab" {
+                let Some(cb) = el.dyn_ref::<HtmlInputElement>() else {
+                    return;
+                };
+                let checked = cb.checked();
+                let val = json!({id: checked});
+                spawn_local(async move {
+                    let _ = settings_set(to_js(val).unwrap_or(JsValue::NULL)).await;
+                    let _ = notify_settings_changed().await;
+                });
+            }
+            if let Some(action) = el.get_attribute("data-action") {
+                if action == "show-shortcuts" {
+                    if let Ok(output) = render_popup(JsValue::NULL) {
+                        let value = from_js(output);
+                        if let Some(html) = value.get("html").and_then(Value::as_str) {
+                            if let Some(r) = doc2.get_element_by_id("root") {
+                                r.set_inner_html(html);
+                            }
                         }
                     }
                 }
             }
-        }
-    }));
+        }));
     let _ = document.add_event_listener_with_callback("change", closure.as_ref().unchecked_ref());
     let _ = document.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref());
     closure.forget();
@@ -3136,9 +3153,15 @@ pub fn new_tab_main() {
     spawn_local(async move {
         if let Ok(resp) = settings_get().await {
             let settings = from_js(resp).get("settings").cloned().unwrap_or_default();
-            if !settings.get("useCustomNewTab").and_then(Value::as_bool).unwrap_or(true) {
+            if !settings
+                .get("useCustomNewTab")
+                .and_then(Value::as_bool)
+                .unwrap_or(true)
+            {
                 if let Ok(url) = js_sys::JSON::parse("\"chrome://newtab\"") {
-                    let _ = win2.location().set_href(&url.as_string().unwrap_or_default());
+                    let _ = win2
+                        .location()
+                        .set_href(&url.as_string().unwrap_or_default());
                 }
                 return;
             }
@@ -3150,15 +3173,21 @@ pub fn new_tab_main() {
 fn setup_new_tab(document: &Document, window: &Window) {
     use web_sys::HtmlInputElement;
 
-    let Some(input) = document.get_element_by_id("q") else { return };
-    let Some(input_el) = input.dyn_ref::<HtmlInputElement>() else { return };
+    let Some(input) = document.get_element_by_id("q") else {
+        return;
+    };
+    let Some(input_el) = input.dyn_ref::<HtmlInputElement>() else {
+        return;
+    };
 
     let _ = input_el.set_attribute("placeholder", "Search DuckDuckGo or enter a URL");
     let _ = input_el.focus();
 
     fn resolve_bang(query: &str) -> Option<String> {
         let trimmed = query.trim();
-        if !trimmed.starts_with('!') { return None; }
+        if !trimmed.starts_with('!') {
+            return None;
+        }
         let (bang, rest) = trimmed.split_once(char::is_whitespace)?;
         let q = rest.trim();
         let encoded = js_sys::encode_uri_component(q);
@@ -3183,17 +3212,26 @@ fn setup_new_tab(document: &Document, window: &Window) {
             "!aur" => format!("https://aur.archlinux.org/packages?K={encoded}"),
             "!def" => format!("https://www.merriam-webster.com/dictionary/{encoded}"),
             "!ud" => format!("https://www.urbandictionary.com/define.php?term={encoded}"),
-            _ => format!("https://duckduckgo.com/?q={}", js_sys::encode_uri_component(trimmed)),
+            _ => format!(
+                "https://duckduckgo.com/?q={}",
+                js_sys::encode_uri_component(trimmed)
+            ),
         };
         Some(url)
     }
 
     fn resolve_url(q: &str) -> String {
         let trimmed = q.trim();
-        if trimmed.is_empty() { return "https://duckduckgo.com/".into(); }
-        if let Some(url) = resolve_bang(trimmed) { return url; }
-        if trimmed.starts_with("http://") || trimmed.starts_with("https://")
-            || trimmed.starts_with("about:") || trimmed.starts_with("file://")
+        if trimmed.is_empty() {
+            return "https://duckduckgo.com/".into();
+        }
+        if let Some(url) = resolve_bang(trimmed) {
+            return url;
+        }
+        if trimmed.starts_with("http://")
+            || trimmed.starts_with("https://")
+            || trimmed.starts_with("about:")
+            || trimmed.starts_with("file://")
             || trimmed.starts_with("chrome://")
         {
             return trimmed.into();
@@ -3201,20 +3239,24 @@ fn setup_new_tab(document: &Document, window: &Window) {
         if trimmed.contains('.') && !trimmed.contains(' ') {
             return format!("https://{trimmed}");
         }
-        format!("https://duckduckgo.com/?q={}", js_sys::encode_uri_component(trimmed))
+        format!(
+            "https://duckduckgo.com/?q={}",
+            js_sys::encode_uri_component(trimmed)
+        )
     }
 
     let input2 = input_el.clone();
     let win2 = window.clone();
     if let Some(form) = input_el.form() {
-        let closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
-            ev.prevent_default();
-            let q = input2.value().trim().to_string();
-            if !q.is_empty() {
-                let url = resolve_url(&q);
-                let _ = win2.location().set_href(&url);
-            }
-        }));
+        let closure =
+            Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
+                ev.prevent_default();
+                let q = input2.value().trim().to_string();
+                if !q.is_empty() {
+                    let url = resolve_url(&q);
+                    let _ = win2.location().set_href(&url);
+                }
+            }));
         let _ = form.add_event_listener_with_callback("submit", closure.as_ref().unchecked_ref());
         closure.forget();
     }
