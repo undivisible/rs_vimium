@@ -14,6 +14,8 @@ use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde_json::{json, Value};
 use settings::UserSettings;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Mutex;
 use wasm_bindgen::prelude::*;
 
@@ -750,7 +752,6 @@ pub async fn handle_background_message(message: JsValue) -> Result<JsValue, JsVa
 pub const POPUP_CSS: &str = r#"
 body{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace}
 "#;
-use std::cell::RefCell;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::{spawn_local, JsFuture};
 use web_sys::{
@@ -3170,6 +3171,224 @@ pub fn new_tab_main() {
     });
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NewTabBangState {
+    name: &'static str,
+    color: &'static str,
+    url: &'static str,
+    query: String,
+}
+
+#[derive(Clone, Copy)]
+struct NewTabBang {
+    aliases: &'static [&'static str],
+    name: &'static str,
+    color: &'static str,
+    url: &'static str,
+}
+
+const NEW_TAB_BANGS: &[NewTabBang] = &[
+    NewTabBang {
+        aliases: &["!g", "!google"],
+        name: "Google",
+        color: "#4285f4",
+        url: "https://www.google.com/search?q=%s",
+    },
+    NewTabBang {
+        aliases: &["!w", "!wiki"],
+        name: "Wikipedia",
+        color: "#636466",
+        url: "https://en.wikipedia.org/w/index.php?search=%s",
+    },
+    NewTabBang {
+        aliases: &["!yt", "!youtube"],
+        name: "Youtube",
+        color: "#ff0033",
+        url: "https://www.youtube.com/results?search_query=%s",
+    },
+    NewTabBang {
+        aliases: &["!gh", "!github"],
+        name: "GitHub",
+        color: "#6e40c9",
+        url: "https://github.com/search?q=%s",
+    },
+    NewTabBang {
+        aliases: &["!a", "!amazon"],
+        name: "Amazon",
+        color: "#ff9900",
+        url: "https://www.amazon.com/s?k=%s",
+    },
+    NewTabBang {
+        aliases: &["!r", "!reddit"],
+        name: "Reddit",
+        color: "#ff4500",
+        url: "https://www.reddit.com/search/?q=%s",
+    },
+    NewTabBang {
+        aliases: &["!so"],
+        name: "Stack Overflow",
+        color: "#f48024",
+        url: "https://stackoverflow.com/search?q=%s",
+    },
+    NewTabBang {
+        aliases: &["!m", "!maps"],
+        name: "Google Maps",
+        color: "#34a853",
+        url: "https://www.google.com/maps?q=%s",
+    },
+    NewTabBang {
+        aliases: &["!im", "!images"],
+        name: "Google Images",
+        color: "#a142f4",
+        url: "https://www.google.com/search?tbm=isch&q=%s",
+    },
+    NewTabBang {
+        aliases: &["!n", "!news"],
+        name: "Google News",
+        color: "#1967d2",
+        url: "https://news.google.com/search?q=%s",
+    },
+    NewTabBang {
+        aliases: &["!docs"],
+        name: "docs.rs",
+        color: "#0f766e",
+        url: "https://docs.rs/releases/search?query=%s",
+    },
+    NewTabBang {
+        aliases: &["!crates"],
+        name: "crates.io",
+        color: "#8b5a2b",
+        url: "https://crates.io/search?q=%s",
+    },
+    NewTabBang {
+        aliases: &["!npm"],
+        name: "npm",
+        color: "#cb3837",
+        url: "https://www.npmjs.com/search?q=%s",
+    },
+    NewTabBang {
+        aliases: &["!ddg", "!duck"],
+        name: "DuckDuckGo",
+        color: "#de5833",
+        url: "https://duckduckgo.com/?q=%s",
+    },
+    NewTabBang {
+        aliases: &["!tr", "!translate"],
+        name: "Google Translate",
+        color: "#1a73e8",
+        url: "https://translate.google.com/?text=%s",
+    },
+    NewTabBang {
+        aliases: &["!tw", "!twitter"],
+        name: "X",
+        color: "#111111",
+        url: "https://x.com/search?q=%s",
+    },
+    NewTabBang {
+        aliases: &["!wa"],
+        name: "WolframAlpha",
+        color: "#dd1100",
+        url: "https://www.wolframalpha.com/input?i=%s",
+    },
+    NewTabBang {
+        aliases: &["!aur"],
+        name: "AUR",
+        color: "#1793d1",
+        url: "https://aur.archlinux.org/packages?K=%s",
+    },
+    NewTabBang {
+        aliases: &["!def"],
+        name: "Merriam-Webster",
+        color: "#0f4c81",
+        url: "https://www.merriam-webster.com/dictionary/%s",
+    },
+    NewTabBang {
+        aliases: &["!ud"],
+        name: "Urban Dictionary",
+        color: "#1d4ed8",
+        url: "https://www.urbandictionary.com/define.php?term=%s",
+    },
+];
+
+fn encode_new_tab_query(query: &str) -> String {
+    query
+        .bytes()
+        .map(|b| {
+            let ch = b as char;
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '~') {
+                ch.to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
+}
+
+fn new_tab_bang_state(query: &str) -> Option<NewTabBangState> {
+    let trimmed = query.trim_start();
+    if !trimmed.starts_with('!') {
+        return None;
+    }
+    let bang_end = trimmed
+        .char_indices()
+        .find_map(|(index, ch)| ch.is_whitespace().then_some(index))?;
+    let bang = &trimmed[..bang_end];
+    let rest = trimmed[bang_end..].trim_start();
+    NEW_TAB_BANGS
+        .iter()
+        .find(|candidate| candidate.aliases.contains(&bang))
+        .map(|candidate| NewTabBangState {
+            name: candidate.name,
+            color: candidate.color,
+            url: candidate.url,
+            query: rest.to_string(),
+        })
+}
+
+fn new_tab_resolve_url_with_bang(query: &str, active_bang: Option<&NewTabBangState>) -> String {
+    let trimmed = query.trim();
+    if let Some(bang) = active_bang {
+        return bang.url.replace("%s", &encode_new_tab_query(trimmed));
+    }
+    if trimmed.is_empty() {
+        return "https://duckduckgo.com/".into();
+    }
+    if let Some(bang) = new_tab_bang_state(trimmed) {
+        return new_tab_resolve_url_with_bang(&bang.query, Some(&bang));
+    }
+    if trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("about:")
+        || trimmed.starts_with("file://")
+        || trimmed.starts_with("chrome://")
+    {
+        return trimmed.into();
+    }
+    if trimmed.contains('.') && !trimmed.contains(' ') {
+        return format!("https://{trimmed}");
+    }
+    format!(
+        "https://duckduckgo.com/?q={}",
+        encode_new_tab_query(trimmed)
+    )
+}
+
+fn apply_new_tab_bang_state(
+    shell: &web_sys::Element,
+    label: &web_sys::Element,
+    active_bang: Option<&NewTabBangState>,
+) {
+    if let Some(bang) = active_bang {
+        let _ = shell.class_list().add_1("is-searching");
+        let _ = shell.set_attribute("style", &format!("--accent: {}", bang.color));
+        label.set_inner_html(&format!("searching {}", bang.name));
+    } else {
+        let _ = shell.class_list().remove_1("is-searching");
+        let _ = shell.remove_attribute("style");
+        label.set_inner_html("");
+    }
+}
+
 fn setup_new_tab(document: &Document, window: &Window) {
     use web_sys::HtmlInputElement;
 
@@ -3181,79 +3400,50 @@ fn setup_new_tab(document: &Document, window: &Window) {
     };
 
     let _ = input_el.set_attribute("placeholder", "Search DuckDuckGo or enter a URL");
+    let _ = input_el.set_attribute("autocomplete", "off");
+    let _ = input_el.set_attribute("autocapitalize", "none");
+    let _ = input_el.set_attribute("spellcheck", "false");
     let _ = input_el.focus();
 
-    fn resolve_bang(query: &str) -> Option<String> {
-        let trimmed = query.trim();
-        if !trimmed.starts_with('!') {
-            return None;
-        }
-        let (bang, rest) = trimmed.split_once(char::is_whitespace)?;
-        let q = rest.trim();
-        let encoded = js_sys::encode_uri_component(q);
-        let url = match bang {
-            "!g" | "!google" => format!("https://www.google.com/search?q={encoded}"),
-            "!w" | "!wiki" => format!("https://en.wikipedia.org/w/index.php?search={encoded}"),
-            "!yt" | "!youtube" => format!("https://www.youtube.com/results?search_query={encoded}"),
-            "!gh" | "!github" => format!("https://github.com/search?q={encoded}"),
-            "!a" | "!amazon" => format!("https://www.amazon.com/s?k={encoded}"),
-            "!r" | "!reddit" => format!("https://www.reddit.com/search/?q={encoded}"),
-            "!so" => format!("https://stackoverflow.com/search?q={encoded}"),
-            "!m" | "!maps" => format!("https://www.google.com/maps?q={encoded}"),
-            "!im" | "!images" => format!("https://www.google.com/search?tbm=isch&q={encoded}"),
-            "!n" | "!news" => format!("https://news.google.com/search?q={encoded}"),
-            "!docs" => format!("https://docs.rs/releases/search?query={encoded}"),
-            "!crates" => format!("https://crates.io/search?q={encoded}"),
-            "!npm" => format!("https://www.npmjs.com/search?q={encoded}"),
-            "!ddg" | "!duck" => format!("https://duckduckgo.com/?q={encoded}"),
-            "!tr" | "!translate" => format!("https://translate.google.com/?text={encoded}"),
-            "!tw" | "!twitter" => format!("https://x.com/search?q={encoded}"),
-            "!wa" => format!("https://www.wolframalpha.com/input?i={encoded}"),
-            "!aur" => format!("https://aur.archlinux.org/packages?K={encoded}"),
-            "!def" => format!("https://www.merriam-webster.com/dictionary/{encoded}"),
-            "!ud" => format!("https://www.urbandictionary.com/define.php?term={encoded}"),
-            _ => format!(
-                "https://duckduckgo.com/?q={}",
-                js_sys::encode_uri_component(trimmed)
-            ),
-        };
-        Some(url)
-    }
-
-    fn resolve_url(q: &str) -> String {
-        let trimmed = q.trim();
-        if trimmed.is_empty() {
-            return "https://duckduckgo.com/".into();
-        }
-        if let Some(url) = resolve_bang(trimmed) {
-            return url;
-        }
-        if trimmed.starts_with("http://")
-            || trimmed.starts_with("https://")
-            || trimmed.starts_with("about:")
-            || trimmed.starts_with("file://")
-            || trimmed.starts_with("chrome://")
-        {
-            return trimmed.into();
-        }
-        if trimmed.contains('.') && !trimmed.contains(' ') {
-            return format!("https://{trimmed}");
-        }
-        format!(
-            "https://duckduckgo.com/?q={}",
-            js_sys::encode_uri_component(trimmed)
-        )
+    let active_bang: Rc<RefCell<Option<NewTabBangState>>> = Rc::new(RefCell::new(None));
+    let shell = document.get_element_by_id("search-shell");
+    let label = document.get_element_by_id("search-label");
+    if let (Some(shell), Some(label)) = (shell, label) {
+        let input_for_input = input_el.clone();
+        let shell_for_input = shell.clone();
+        let label_for_input = label.clone();
+        let active_for_input = active_bang.clone();
+        let closure =
+            Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_ev: web_sys::Event| {
+                let value = input_for_input.value();
+                if let Some(next) = new_tab_bang_state(&value) {
+                    input_for_input.set_value(&next.query);
+                    *active_for_input.borrow_mut() = Some(next);
+                } else if value.trim().is_empty() {
+                    *active_for_input.borrow_mut() = None;
+                }
+                apply_new_tab_bang_state(
+                    &shell_for_input,
+                    &label_for_input,
+                    active_for_input.borrow().as_ref(),
+                );
+            }));
+        let _ =
+            input_el.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
+        closure.forget();
     }
 
     let input2 = input_el.clone();
     let win2 = window.clone();
+    let active_for_submit = active_bang.clone();
     if let Some(form) = input_el.form() {
         let closure =
             Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
                 ev.prevent_default();
                 let q = input2.value().trim().to_string();
                 if !q.is_empty() {
-                    let url = resolve_url(&q);
+                    let active = active_for_submit.borrow();
+                    let url = new_tab_resolve_url_with_bang(&q, active.as_ref());
                     let _ = win2.location().set_href(&url);
                 }
             }));
@@ -3282,5 +3472,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn new_tab_bang_state_strips_keyword_and_keeps_query() {
+        let state = new_tab_bang_state("!yt rust wasm").unwrap();
+        assert_eq!("Youtube", state.name);
+        assert_eq!("rust wasm", state.query);
+        assert_eq!("#ff0033", state.color);
+    }
+
+    #[test]
+    fn new_tab_url_uses_active_bang_service() {
+        let state = new_tab_bang_state("!gh rust wasm").unwrap();
+        assert_eq!(
+            "https://github.com/search?q=rust%20wasm",
+            new_tab_resolve_url_with_bang(&state.query, Some(&state))
+        );
+    }
+
+    #[test]
+    fn new_tab_url_falls_back_for_unknown_bang() {
+        assert_eq!(
+            "https://duckduckgo.com/?q=%21unknown%20rust",
+            new_tab_resolve_url_with_bang("!unknown rust", None)
+        );
     }
 }
