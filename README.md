@@ -14,7 +14,7 @@ Load `dist/unpacked/` as an unpacked extension in `chrome://extensions`.
 
 | Path | Role |
 | --- | --- |
-| `webext.toml` | Extension manifest (capabilities, content scripts, pages) |
+| `crepus.toml` | Extension manifest (capabilities, content scripts, pages) |
 | `runtime/` | Rust/WASM (`popup_main`, `content_main`, `options_main`, `new_tab_main`) |
 | `pages/` | Extension pages (`.crepus` → HTML at build time) |
 | `views/ui.crepus` | In-page UI templates (hints, vomnibar, find bar, help overlay) |

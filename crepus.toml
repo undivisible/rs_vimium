@@ -1,10 +1,15 @@
-[extension]
+[[targets]]
+type = "webext"
+id = "rs-vimium"
+app = "."
+
+[targets.extension]
 name = "rs_vimium"
 version = "1.0.1"
 description = "Vim-style keyboard navigation for the web — Rust + Crepuscularity"
 minimum_chrome_version = "117.0"
 
-[capabilities]
+[targets.capabilities]
 tabs = true
 storage = true
 sessions = true

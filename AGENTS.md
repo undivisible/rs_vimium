@@ -12,7 +12,7 @@ crepus webext build --app .
 ## Structure
 
 ```
-webext.toml          # Extension manifest source of truth
+crepus.toml          # Extension manifest source of truth
 runtime/             # Rust WASM runtime
   Cargo.toml         #   workspace member
   src/
