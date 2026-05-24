@@ -1,97 +1,117 @@
 main min-h-screen grid place-items-center
-  form w-full max-w-[520px] px-4
-    fieldset #search-shell
-      legend #search-label
-      input #q autofocus type="search" w-full box-border text-sm font-mono outline-none
-  details bang-help
-    summary aria-label="Bang help" title="Bang help"
-      "?"
-    div bang-panel
-      h2
-        "Bangs"
-      p
-        "Type a bang, a space, then your search. The bang is removed and the field switches to that service."
-      dl
-        dt
-          "!g"
-        dd
-          "Google"
-        dt
-          "!w"
-        dd
-          "Wikipedia"
-        dt
-          "!yt"
-        dd
-          "Youtube"
-        dt
-          "!gh"
-        dd
-          "GitHub"
-        dt
-          "!ddg"
-        dd
-          "DuckDuckGo"
-        dt
-          "!docs"
-        dd
-          "docs.rs"
-        dt
-          "!crates"
-        dd
-          "crates.io"
-        dt
-          "!so"
-        dd
-          "Stack Overflow"
-        dt
-          "!a"
-        dd
-          "Amazon"
-        dt
-          "!r"
-        dd
-          "Reddit"
-        dt
-          "!m"
-        dd
-          "Google Maps"
-        dt
-          "!im"
-        dd
-          "Google Images"
-        dt
-          "!n"
-        dd
-          "Google News"
-        dt
-          "!npm"
-        dd
-          "npm"
-        dt
-          "!tr"
-        dd
-          "Google Translate"
-        dt
-          "!tw"
-        dd
-          "X"
-        dt
-          "!wa"
-        dd
-          "WolframAlpha"
-        dt
-          "!aur"
-        dd
-          "AUR"
-        dt
-          "!def"
-        dd
-          "Merriam-Webster"
-        dt
-          "!ud"
-        dd
-          "Urban Dictionary"
+  section new-tab-surface
+    div #clock-panel clock-panel hidden
+      div #clock-time clock-time
+      div #clock-date clock-date
+    form w-full max-w-[520px] px-4
+      fieldset #search-shell
+        legend #search-label
+        input #q autofocus type="search" w-full box-border text-sm font-mono outline-none
+    nav #bookmark-strip bookmark-strip hidden aria-label="Bookmarks"
+  div control-cluster
+    details settings-menu
+      summary aria-label="New tab settings" title="New tab settings"
+        "S"
+      div settings-panel
+        h2
+          "Settings"
+        label toggle-row
+          input #show-clock type="checkbox"
+          span
+            "Show clock and date"
+        label toggle-row
+          input #show-bookmarks type="checkbox"
+          span
+            "Show bookmarks"
+    details bang-help
+      summary aria-label="Bang help" title="Bang help"
+        "?"
+      div bang-panel
+        h2
+          "Bangs"
+        p
+          "Type a bang, a space, then your search. The bang is removed and the field switches to that service."
+        dl
+          dt
+            "!g"
+          dd
+            "Google"
+          dt
+            "!w"
+          dd
+            "Wikipedia"
+          dt
+            "!yt"
+          dd
+            "Youtube"
+          dt
+            "!gh"
+          dd
+            "GitHub"
+          dt
+            "!ddg"
+          dd
+            "DuckDuckGo"
+          dt
+            "!docs"
+          dd
+            "docs.rs"
+          dt
+            "!crates"
+          dd
+            "crates.io"
+          dt
+            "!so"
+          dd
+            "Stack Overflow"
+          dt
+            "!a"
+          dd
+            "Amazon"
+          dt
+            "!r"
+          dd
+            "Reddit"
+          dt
+            "!m"
+          dd
+            "Google Maps"
+          dt
+            "!im"
+          dd
+            "Google Images"
+          dt
+            "!n"
+          dd
+            "Google News"
+          dt
+            "!npm"
+          dd
+            "npm"
+          dt
+            "!tr"
+          dd
+            "Google Translate"
+          dt
+            "!tw"
+          dd
+            "X"
+          dt
+            "!wa"
+          dd
+            "WolframAlpha"
+          dt
+            "!aur"
+          dd
+            "AUR"
+          dt
+            "!def"
+          dd
+            "Merriam-Webster"
+          dt
+            "!ud"
+          dd
+            "Urban Dictionary"
 
 <style>
 :root {
@@ -115,6 +135,11 @@ main min-h-screen grid place-items-center
 html,body{margin:0;min-height:100%;background:var(--bg);color:var(--fg);font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace}
 body{overflow:hidden}
 main{min-height:100vh;display:grid;place-items:center;box-sizing:border-box;padding:0 16px}
+.new-tab-surface{width:100%;display:grid;justify-items:center;gap:18px}
+.clock-panel{text-align:center}
+.clock-panel[hidden],.bookmark-strip[hidden]{display:none}
+.clock-time{font-size:34px;line-height:1;font-weight:700}
+.clock-date{margin-top:8px;color:var(--muted);font-size:12px}
 form{width:100%;max-width:520px}
 fieldset{--accent:var(--border);box-sizing:border-box;width:100%;min-width:0;margin:0;padding:0 12px 0;border:1px solid var(--border);transition:border-color .12s ease}
 legend{display:none;margin-left:4px;padding:0 6px;color:var(--accent);font-size:11px;line-height:1;text-transform:lowercase}
@@ -126,13 +151,19 @@ input::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;disp
 fieldset:focus-within{border-color:var(--fg)}
 fieldset.is-searching:focus-within{border-color:var(--accent)}
 input::placeholder{color:var(--ph)}
-.bang-help{position:fixed;left:16px;bottom:16px}
-.bang-help summary{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--border);border-radius:50%;background:var(--bg);color:var(--fg);font-size:16px;line-height:1;cursor:pointer;list-style:none;user-select:none}
-.bang-help summary::-webkit-details-marker{display:none}
-.bang-help[open] summary{background:var(--fg);color:var(--bg)}
-.bang-panel{position:absolute;left:0;bottom:44px;width:272px;box-sizing:border-box;border:1px solid var(--border);background:var(--panel);padding:14px;box-shadow:0 18px 42px rgba(0,0,0,.18)}
-.bang-panel h2{margin:0 0 8px;font-size:13px;font-weight:700}
+.bookmark-strip{width:min(520px,calc(100vw - 32px));display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.bookmark-strip a{box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--border);padding:9px 10px;color:var(--fg);font-size:11px;text-decoration:none}
+.bookmark-strip a:hover{background:var(--fg);color:var(--bg)}
+.control-cluster{position:fixed;left:16px;bottom:16px;display:flex;gap:8px}
+.settings-menu,.bang-help{position:relative}
+.settings-menu summary,.bang-help summary{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--border);border-radius:50%;background:var(--bg);color:var(--fg);font-size:16px;line-height:1;cursor:pointer;list-style:none;user-select:none}
+.settings-menu summary::-webkit-details-marker,.bang-help summary::-webkit-details-marker{display:none}
+.settings-menu[open] summary,.bang-help[open] summary{background:var(--fg);color:var(--bg)}
+.settings-panel,.bang-panel{position:absolute;left:0;bottom:44px;width:272px;box-sizing:border-box;border:1px solid var(--border);background:var(--panel);padding:14px;box-shadow:0 18px 42px rgba(0,0,0,.18)}
+.settings-panel h2,.bang-panel h2{margin:0 0 8px;font-size:13px;font-weight:700}
 .bang-panel p{margin:0 0 12px;color:var(--muted);font-size:11px;line-height:1.45}
+.toggle-row{display:flex;align-items:center;gap:9px;margin-top:10px;color:var(--fg);font-size:12px}
+.toggle-row input{width:14px;height:14px;accent-color:var(--fg)}
 .bang-panel dl{display:grid;grid-template-columns:auto 1fr;gap:7px 12px;max-height:320px;overflow:auto;margin:0;font-size:12px}
 .bang-panel dt{font-weight:700}
 .bang-panel dd{margin:0;color:var(--muted)}

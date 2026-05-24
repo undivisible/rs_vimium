@@ -8,7 +8,8 @@ use commands::KeyMapRegistry;
 use crepuscularity_core::context::{TemplateContext, TemplateValue};
 use crepuscularity_web::render_component_file_to_html;
 use crepuscularity_webext::wasm::{
-    runtime as browser_runtime, storage, tabs, windows, EventListenerGuard,
+    bookmarks as browser_bookmarks, runtime as browser_runtime, storage, tabs, windows,
+    EventListenerGuard,
 };
 use once_cell::sync::Lazy;
 use serde::Serialize;
@@ -3389,6 +3390,163 @@ fn apply_new_tab_bang_state(
     }
 }
 
+fn cancel_new_tab_bang(active_bang: &mut Option<NewTabBangState>) -> bool {
+    if active_bang.is_none() {
+        return false;
+    }
+    *active_bang = None;
+    true
+}
+
+fn set_element_hidden(element: &Element, hidden: bool) {
+    if hidden {
+        let _ = element.set_attribute("hidden", "");
+    } else {
+        let _ = element.remove_attribute("hidden");
+    }
+}
+
+fn update_new_tab_clock(document: &Document) {
+    let Some(time_el) = document.get_element_by_id("clock-time") else {
+        return;
+    };
+    let Some(date_el) = document.get_element_by_id("clock-date") else {
+        return;
+    };
+    let now = js_sys::Date::new_0();
+    let time = now
+        .to_locale_time_string("en-AU")
+        .as_string()
+        .unwrap_or_default();
+    let date = now
+        .to_locale_date_string("en-AU", &JsValue::UNDEFINED)
+        .as_string()
+        .unwrap_or_default();
+    time_el.set_text_content(Some(&time));
+    date_el.set_text_content(Some(&date));
+}
+
+fn install_new_tab_clock(document: &Document, window: &Window) {
+    update_new_tab_clock(document);
+    let document_for_tick = document.clone();
+    let closure = Closure::<dyn FnMut()>::wrap(Box::new(move || {
+        update_new_tab_clock(&document_for_tick);
+    }));
+    let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
+        closure.as_ref().unchecked_ref(),
+        30_000,
+    );
+    closure.forget();
+}
+
+fn load_new_tab_bookmarks(document: Document) {
+    spawn_local(async move {
+        let Some(strip) = document.get_element_by_id("bookmark-strip") else {
+            return;
+        };
+        let Ok(bookmarks) = browser_bookmarks::get_recent(8).await else {
+            return;
+        };
+        strip.set_inner_html("");
+        for bookmark in bookmarks {
+            let Some(url) = bookmark.url else {
+                continue;
+            };
+            let Ok(link) = document.create_element("a") else {
+                continue;
+            };
+            let _ = link.set_attribute("href", &url);
+            link.set_text_content(Some(if bookmark.title.is_empty() {
+                &url
+            } else {
+                &bookmark.title
+            }));
+            append(&strip, &link);
+        }
+    });
+}
+
+fn apply_new_tab_preferences(document: &Document, show_clock: bool, show_bookmarks: bool) {
+    if let Some(clock) = document.get_element_by_id("clock-panel") {
+        set_element_hidden(&clock, !show_clock);
+    }
+    if let Some(bookmarks) = document.get_element_by_id("bookmark-strip") {
+        set_element_hidden(&bookmarks, !show_bookmarks);
+    }
+}
+
+fn install_new_tab_preferences(document: &Document, window: &Window) {
+    let clock_input = document
+        .get_element_by_id("show-clock")
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok());
+    let bookmarks_input = document
+        .get_element_by_id("show-bookmarks")
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok());
+    let Some(clock_input) = clock_input else {
+        return;
+    };
+    let Some(bookmarks_input) = bookmarks_input else {
+        return;
+    };
+
+    install_new_tab_clock(document, window);
+    load_new_tab_bookmarks(document.clone());
+
+    let document_for_load = document.clone();
+    let clock_for_load = clock_input.clone();
+    let bookmarks_for_load = bookmarks_input.clone();
+    spawn_local(async move {
+        let stored = storage::sync()
+            .get_json(json!({
+                "newTabShowClock": false,
+                "newTabShowBookmarks": false
+            }))
+            .await
+            .unwrap_or_default();
+        let show_clock = stored
+            .get("newTabShowClock")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let show_bookmarks = stored
+            .get("newTabShowBookmarks")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        clock_for_load.set_checked(show_clock);
+        bookmarks_for_load.set_checked(show_bookmarks);
+        apply_new_tab_preferences(&document_for_load, show_clock, show_bookmarks);
+    });
+
+    let install_toggle = |input: HtmlInputElement, key: &'static str, document: Document| {
+        let input_for_change = input.clone();
+        let closure =
+            Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_ev: web_sys::Event| {
+                let value = input_for_change.checked();
+                let document_for_save = document.clone();
+                spawn_local(async move {
+                    let mut settings = serde_json::Map::new();
+                    settings.insert(key.to_string(), Value::Bool(value));
+                    let _ = storage::sync().set(&Value::Object(settings)).await;
+                    let show_clock = document_for_save
+                        .get_element_by_id("show-clock")
+                        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+                        .map(|el| el.checked())
+                        .unwrap_or(false);
+                    let show_bookmarks = document_for_save
+                        .get_element_by_id("show-bookmarks")
+                        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+                        .map(|el| el.checked())
+                        .unwrap_or(false);
+                    apply_new_tab_preferences(&document_for_save, show_clock, show_bookmarks);
+                });
+            }));
+        let _ = input.add_event_listener_with_callback("change", closure.as_ref().unchecked_ref());
+        closure.forget();
+    };
+
+    install_toggle(clock_input, "newTabShowClock", document.clone());
+    install_toggle(bookmarks_input, "newTabShowBookmarks", document.clone());
+}
+
 fn setup_new_tab(document: &Document, window: &Window) {
     use web_sys::HtmlInputElement;
 
@@ -3431,7 +3589,23 @@ fn setup_new_tab(document: &Document, window: &Window) {
         let _ =
             input_el.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref());
         closure.forget();
+
+        let shell_for_key = shell.clone();
+        let label_for_key = label.clone();
+        let active_for_key = active_bang.clone();
+        let closure =
+            Closure::<dyn FnMut(KeyboardEvent)>::wrap(Box::new(move |ev: KeyboardEvent| {
+                if ev.key() == "Escape" && cancel_new_tab_bang(&mut active_for_key.borrow_mut()) {
+                    ev.prevent_default();
+                    apply_new_tab_bang_state(&shell_for_key, &label_for_key, None);
+                }
+            }));
+        let _ =
+            input_el.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
+        closure.forget();
     }
+
+    install_new_tab_preferences(document, window);
 
     let input2 = input_el.clone();
     let win2 = window.clone();
@@ -3497,5 +3671,14 @@ mod tests {
             "https://duckduckgo.com/?q=%21unknown%20rust",
             new_tab_resolve_url_with_bang("!unknown rust", None)
         );
+    }
+
+    #[test]
+    fn new_tab_escape_cancels_active_bang_once() {
+        let mut active = new_tab_bang_state("!w rust");
+        assert!(active.is_some());
+        assert!(cancel_new_tab_bang(&mut active));
+        assert!(active.is_none());
+        assert!(!cancel_new_tab_bang(&mut active));
     }
 }
