@@ -8,7 +8,7 @@ main min-h-screen grid place-items-center
         legend #search-label
         input #q autofocus type="search" w-full box-border text-sm font-mono outline-none
     nav #bookmark-strip bookmark-strip hidden aria-label="Bookmarks"
-  div new-tab-actions
+  div control-cluster
     details settings-menu
       summary aria-label="New tab settings" title="New tab settings"
         span material-symbols-outlined aria-hidden="true"
@@ -157,12 +157,12 @@ input::placeholder{color:var(--ph)}
 .bookmark-strip{width:min(520px,calc(100vw - 32px));display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
 .bookmark-strip a{box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--border);padding:9px 10px;color:var(--fg);font-size:11px;text-decoration:none}
 .bookmark-strip a:hover{background:var(--fg);color:var(--bg)}
-.new-tab-actions{position:fixed;right:16px;top:16px;display:flex;gap:8px}
+.control-cluster{position:fixed;left:16px;bottom:16px;display:flex;gap:8px}
 .settings-menu,.bang-help{position:relative}
 .settings-menu summary,.bang-help summary{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--border);border-radius:50%;background:var(--bg);color:var(--fg);font-size:16px;line-height:1;cursor:pointer;list-style:none;user-select:none}
 .settings-menu summary::-webkit-details-marker,.bang-help summary::-webkit-details-marker{display:none}
 .settings-menu[open] summary,.bang-help[open] summary{background:var(--fg);color:var(--bg)}
-.settings-panel,.bang-panel{position:absolute;right:0;top:44px;width:min(272px,calc(100vw - 32px));box-sizing:border-box;border:1px solid var(--border);background:var(--panel);padding:14px;box-shadow:0 18px 42px rgba(0,0,0,.18)}
+.settings-panel,.bang-panel{position:absolute;left:0;bottom:44px;width:272px;box-sizing:border-box;border:1px solid var(--border);background:var(--panel);padding:14px;box-shadow:0 18px 42px rgba(0,0,0,.18)}
 .settings-panel h2,.bang-panel h2{margin:0 0 8px;font-size:13px;font-weight:700}
 .bang-panel p{margin:0 0 12px;color:var(--muted);font-size:11px;line-height:1.45}
 .toggle-row{display:flex;align-items:center;gap:9px;margin-top:10px;color:var(--fg);font-size:12px}
