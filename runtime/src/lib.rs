@@ -1190,6 +1190,9 @@ fn element_style_allows_hint(element: &Element) -> bool {
     let Some(window) = win() else {
         return false;
     };
+    if element_is_hidden_by_closed_details(element) {
+        return false;
+    }
     let mut current = Some(element.clone());
     while let Some(element) = current {
         let Ok(Some(style)) = window.get_computed_style(&element) else {
@@ -1204,6 +1207,25 @@ fn element_style_allows_hint(element: &Element) -> bool {
         current = element.parent_element();
     }
     true
+}
+
+fn element_is_hidden_by_closed_details(element: &Element) -> bool {
+    let mut current = Some(element.clone());
+    let mut inside_summary = false;
+    while let Some(node) = current {
+        let tag = node.tag_name().to_lowercase();
+        if tag == "summary" {
+            inside_summary = true;
+        }
+        if tag == "details" {
+            if !node.has_attribute("open") && !inside_summary {
+                return true;
+            }
+            inside_summary = false;
+        }
+        current = node.parent_element();
+    }
+    false
 }
 
 fn rect_bounds(rect: &web_sys::DomRect) -> RectBounds {
