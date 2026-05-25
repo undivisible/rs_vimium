@@ -1181,20 +1181,29 @@ fn crop_rect_to_viewport(
     hint_rect_is_usable(cropped).then_some(cropped)
 }
 
-fn hint_style_allows_target(display: &str, visibility: &str) -> bool {
-    display != "none" && visibility == "visible"
+fn hint_style_allows_target(display: &str, visibility: &str, opacity: &str) -> bool {
+    let opacity = opacity.trim().parse::<f64>().unwrap_or(1.0);
+    display != "none" && visibility == "visible" && opacity > 0.0
 }
 
 fn element_style_allows_hint(element: &Element) -> bool {
     let Some(window) = win() else {
         return false;
     };
-    let Ok(Some(style)) = window.get_computed_style(element) else {
-        return false;
-    };
-    let display = style.get_property_value("display").unwrap_or_default();
-    let visibility = style.get_property_value("visibility").unwrap_or_default();
-    hint_style_allows_target(&display, &visibility)
+    let mut current = Some(element.clone());
+    while let Some(element) = current {
+        let Ok(Some(style)) = window.get_computed_style(&element) else {
+            return false;
+        };
+        let display = style.get_property_value("display").unwrap_or_default();
+        let visibility = style.get_property_value("visibility").unwrap_or_default();
+        let opacity = style.get_property_value("opacity").unwrap_or_default();
+        if !hint_style_allows_target(&display, &visibility, &opacity) {
+            return false;
+        }
+        current = element.parent_element();
+    }
+    true
 }
 
 fn rect_bounds(rect: &web_sys::DomRect) -> RectBounds {
@@ -3908,11 +3917,12 @@ mod tests {
     }
 
     #[test]
-    fn hint_style_excludes_display_and_visibility_but_not_opacity() {
-        assert!(!hint_style_allows_target("none", "visible"));
-        assert!(!hint_style_allows_target("block", "hidden"));
-        assert!(!hint_style_allows_target("block", "collapse"));
-        assert!(hint_style_allows_target("block", "visible"));
+    fn hint_style_excludes_hidden_and_transparent_targets() {
+        assert!(!hint_style_allows_target("none", "visible", "1"));
+        assert!(!hint_style_allows_target("block", "hidden", "1"));
+        assert!(!hint_style_allows_target("block", "collapse", "1"));
+        assert!(!hint_style_allows_target("block", "visible", "0"));
+        assert!(hint_style_allows_target("block", "visible", "0.01"));
     }
 
     #[test]
