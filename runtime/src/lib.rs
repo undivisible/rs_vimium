@@ -21,6 +21,7 @@ use std::sync::Mutex;
 use wasm_bindgen::prelude::*;
 
 const UI_CREPUS: &str = include_str!("../views/ui.crepus");
+const CONTENT_TOOLS_CSS: &str = include_str!("../../src/content.css.crepus");
 
 static COMMAND_REGISTRY: Lazy<KeyMapRegistry> = Lazy::new(KeyMapRegistry::from_defaults);
 static USER_SETTINGS: Lazy<Mutex<UserSettings>> = Lazy::new(|| Mutex::new(UserSettings::new()));
@@ -2713,6 +2714,91 @@ fn apply_content_effect(effect: Value) {
     }
 }
 
+fn handle_content_keydown(event: KeyboardEvent, editable: bool) {
+    let key = key_name_from_event(&event);
+    if key.is_empty() {
+        return;
+    }
+    let pass_next = CONTENT_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let pass_next = state.pass_next_key;
+        state.pass_next_key = false;
+        pass_next
+    });
+    if pass_next {
+        return;
+    }
+    let find_mode = CONTENT_STATE.with(|state| state.borrow().key_state.mode == "find");
+    if find_mode {
+        if matches!(key.as_str(), "Esc" | "enter") {
+            event.prevent_default();
+            event.stop_propagation();
+            handle_find_key(&key, &event);
+        }
+        return;
+    }
+    let hints_mode = CONTENT_STATE.with(|state| state.borrow().key_state.mode == "hints");
+    if hints_mode && key != "Esc" {
+        event.prevent_default();
+        event.stop_propagation();
+        if key.len() == 1 {
+            update_hints(&key);
+        }
+        return;
+    }
+    let mark_mode = CONTENT_STATE.with(|state| state.borrow().mark_mode.is_some());
+    if mark_mode {
+        event.prevent_default();
+        event.stop_propagation();
+        handle_mark_key(&key, &event);
+        return;
+    }
+    let state_js = CONTENT_STATE.with(|state| {
+        let state = &state.borrow().key_state;
+        to_js(json!({"mode": state.mode, "sequence": state.sequence, "countText": state.count_text, "input": state.input})).unwrap_or(JsValue::NULL)
+    });
+    let Ok(result_js) = content_key(state_js, &key, editable) else {
+        return;
+    };
+    let result = from_js(result_js);
+    if let Some(next) = result.get("state") {
+        CONTENT_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.key_state.mode = next
+                .get("mode")
+                .and_then(Value::as_str)
+                .unwrap_or("normal")
+                .to_string();
+            state.key_state.sequence = next
+                .get("sequence")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            state.key_state.count_text = next
+                .get("countText")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            state.key_state.input = next
+                .get("input")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+        });
+    }
+    if result
+        .get("prevent")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        event.prevent_default();
+        event.stop_propagation();
+    }
+    if let Some(effect) = result.get("effect").cloned() {
+        apply_content_effect(effect);
+    }
+}
+
 fn refresh_content_settings() {
     spawn_local(async {
         let _ = settings_seed().await;
@@ -2791,93 +2877,11 @@ pub fn content_main() {
             document.add_event_listener_with_callback(event_name, closure.as_ref().unchecked_ref());
         closure.forget();
     }
-    let closure = Closure::<dyn FnMut(KeyboardEvent)>::wrap(Box::new(
-        move |event: KeyboardEvent| {
-            let key = key_name_from_event(&event);
-            if key.is_empty() {
-                return;
-            }
-            let pass_next = CONTENT_STATE.with(|state| {
-                let mut state = state.borrow_mut();
-                let pass_next = state.pass_next_key;
-                state.pass_next_key = false;
-                pass_next
-            });
-            if pass_next {
-                return;
-            }
-            let find_mode = CONTENT_STATE.with(|state| state.borrow().key_state.mode == "find");
-            if find_mode {
-                if matches!(key.as_str(), "Esc" | "enter") {
-                    event.prevent_default();
-                    event.stop_propagation();
-                    handle_find_key(&key, &event);
-                }
-                return;
-            }
-            let hints_mode = CONTENT_STATE.with(|state| state.borrow().key_state.mode == "hints");
-            if hints_mode && key != "Esc" {
-                event.prevent_default();
-                event.stop_propagation();
-                if key.len() == 1 {
-                    update_hints(&key);
-                }
-                return;
-            }
-            let mark_mode = CONTENT_STATE.with(|state| state.borrow().mark_mode.is_some());
-            if mark_mode {
-                event.prevent_default();
-                event.stop_propagation();
-                handle_mark_key(&key, &event);
-                return;
-            }
+    let closure =
+        Closure::<dyn FnMut(KeyboardEvent)>::wrap(Box::new(move |event: KeyboardEvent| {
             let editable = is_editable_target(event.target());
-            let state_js = CONTENT_STATE.with(|state| {
-            let state = &state.borrow().key_state;
-            to_js(json!({"mode": state.mode, "sequence": state.sequence, "countText": state.count_text, "input": state.input})).unwrap_or(JsValue::NULL)
-        });
-            let Ok(result_js) = content_key(state_js, &key, editable) else {
-                return;
-            };
-            let result = from_js(result_js);
-            if let Some(next) = result.get("state") {
-                CONTENT_STATE.with(|state| {
-                    let mut state = state.borrow_mut();
-                    state.key_state.mode = next
-                        .get("mode")
-                        .and_then(Value::as_str)
-                        .unwrap_or("normal")
-                        .to_string();
-                    state.key_state.sequence = next
-                        .get("sequence")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
-                    state.key_state.count_text = next
-                        .get("countText")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
-                    state.key_state.input = next
-                        .get("input")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
-                });
-            }
-            if result
-                .get("prevent")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                event.prevent_default();
-                event.stop_propagation();
-            }
-            if let Some(effect) = result.get("effect").cloned() {
-                apply_content_effect(effect);
-            }
-        },
-    ));
+            handle_content_keydown(event, editable);
+        }));
     let _ = document.add_event_listener_with_callback_and_bool(
         "keydown",
         closure.as_ref().unchecked_ref(),
@@ -3547,6 +3551,52 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
     install_toggle(bookmarks_input, "newTabShowBookmarks", document.clone());
 }
 
+fn install_content_tools_css(document: &Document) {
+    if document
+        .get_element_by_id("rs-vimium-content-tools-css")
+        .is_some()
+    {
+        return;
+    }
+    let Ok(style) = document.create_element("style") else {
+        return;
+    };
+    style.set_id("rs-vimium-content-tools-css");
+    style.set_text_content(Some(CONTENT_TOOLS_CSS));
+    if let Some(head) = document.head() {
+        let _ = head.append_child(&style);
+    }
+}
+
+fn install_new_tab_vimium_keys(document: &Document) {
+    CONTENT_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.enabled = true;
+        state.key_state = key_handler::KeyState::new();
+    });
+    refresh_content_settings();
+    install_content_tools_css(document);
+
+    let closure =
+        Closure::<dyn FnMut(KeyboardEvent)>::wrap(Box::new(move |event: KeyboardEvent| {
+            let editable = is_editable_target(event.target());
+            handle_content_keydown(event, editable);
+        }));
+    let _ = document.add_event_listener_with_callback_and_bool(
+        "keydown",
+        closure.as_ref().unchecked_ref(),
+        true,
+    );
+    closure.forget();
+}
+
+fn focus_new_tab_normal_mode(document: &Document) {
+    if let Some(body) = document.body() {
+        body.set_tab_index(-1);
+        let _ = body.focus();
+    }
+}
+
 fn setup_new_tab(document: &Document, window: &Window) {
     use web_sys::HtmlInputElement;
 
@@ -3561,7 +3611,6 @@ fn setup_new_tab(document: &Document, window: &Window) {
     let _ = input_el.set_attribute("autocomplete", "off");
     let _ = input_el.set_attribute("autocapitalize", "none");
     let _ = input_el.set_attribute("spellcheck", "false");
-    let _ = input_el.focus();
 
     let active_bang: Rc<RefCell<Option<NewTabBangState>>> = Rc::new(RefCell::new(None));
     let shell = document.get_element_by_id("search-shell");
@@ -3606,6 +3655,8 @@ fn setup_new_tab(document: &Document, window: &Window) {
     }
 
     install_new_tab_preferences(document, window);
+    install_new_tab_vimium_keys(document);
+    focus_new_tab_normal_mode(document);
 
     let input2 = input_el.clone();
     let win2 = window.clone();
