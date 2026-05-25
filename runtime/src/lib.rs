@@ -1181,9 +1181,51 @@ fn crop_rect_to_viewport(
     hint_rect_is_usable(cropped).then_some(cropped)
 }
 
-fn hint_style_allows_target(display: &str, visibility: &str, opacity: &str) -> bool {
-    let opacity = opacity.trim().parse::<f64>().unwrap_or(1.0);
-    display != "none" && visibility == "visible" && opacity > 0.0
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ElementStyleState {
+    display: String,
+    visibility: String,
+    opacity: String,
+    overflow_x: String,
+    overflow_y: String,
+}
+
+impl ElementStyleState {
+    fn is_displayed(&self) -> bool {
+        self.display != "none" && self.visibility != "hidden" && self.visibility != "collapse"
+    }
+
+    fn opacity_value(&self) -> f64 {
+        self.opacity.trim().parse::<f64>().unwrap_or(1.0)
+    }
+
+    fn allows_hint_target(&self) -> bool {
+        self.is_displayed() && self.opacity_value() > 0.0
+    }
+
+    fn overflow_for_axis(&self, axis: &str) -> &str {
+        if axis == "x" {
+            &self.overflow_x
+        } else {
+            &self.overflow_y
+        }
+    }
+}
+
+fn element_style_state(window: &Window, element: &Element) -> Option<ElementStyleState> {
+    let style = window.get_computed_style(element).ok().flatten()?;
+    let display = style.get_property_value("display").unwrap_or_default();
+    let visibility = style.get_property_value("visibility").unwrap_or_default();
+    let opacity = style.get_property_value("opacity").unwrap_or_default();
+    let overflow_x = style.get_property_value("overflow-x").unwrap_or_default();
+    let overflow_y = style.get_property_value("overflow-y").unwrap_or_default();
+    Some(ElementStyleState {
+        display,
+        visibility,
+        opacity,
+        overflow_x,
+        overflow_y,
+    })
 }
 
 fn element_style_allows_hint(element: &Element) -> bool {
@@ -1195,13 +1237,10 @@ fn element_style_allows_hint(element: &Element) -> bool {
     }
     let mut current = Some(element.clone());
     while let Some(element) = current {
-        let Ok(Some(style)) = window.get_computed_style(&element) else {
+        let Some(style) = element_style_state(&window, &element) else {
             return false;
         };
-        let display = style.get_property_value("display").unwrap_or_default();
-        let visibility = style.get_property_value("visibility").unwrap_or_default();
-        let opacity = style.get_property_value("opacity").unwrap_or_default();
-        if !hint_style_allows_target(&display, &visibility, &opacity) {
+        if !style.allows_hint_target() {
             return false;
         }
         current = element.parent_element();
@@ -1425,19 +1464,10 @@ fn should_scroll_element(element: &Element, axis: &str) -> bool {
     let Some(window) = win() else {
         return true;
     };
-    let Ok(Some(style)) = window.get_computed_style(element) else {
+    let Some(style) = element_style_state(&window, element) else {
         return true;
     };
-    let overflow = style
-        .get_property_value(if axis == "x" {
-            "overflow-x"
-        } else {
-            "overflow-y"
-        })
-        .unwrap_or_default();
-    let visibility = style.get_property_value("visibility").unwrap_or_default();
-    let display = style.get_property_value("display").unwrap_or_default();
-    overflow != "hidden" && visibility != "hidden" && visibility != "collapse" && display != "none"
+    style.overflow_for_axis(axis) != "hidden" && style.is_displayed()
 }
 
 fn can_scroll_element(element: &Element, axis: &str, delta: f64) -> bool {
@@ -3940,11 +3970,21 @@ mod tests {
 
     #[test]
     fn hint_style_excludes_hidden_and_transparent_targets() {
-        assert!(!hint_style_allows_target("none", "visible", "1"));
-        assert!(!hint_style_allows_target("block", "hidden", "1"));
-        assert!(!hint_style_allows_target("block", "collapse", "1"));
-        assert!(!hint_style_allows_target("block", "visible", "0"));
-        assert!(hint_style_allows_target("block", "visible", "0.01"));
+        let allows = |display: &str, visibility: &str, opacity: &str| {
+            ElementStyleState {
+                display: display.to_string(),
+                visibility: visibility.to_string(),
+                opacity: opacity.to_string(),
+                overflow_x: String::new(),
+                overflow_y: String::new(),
+            }
+            .allows_hint_target()
+        };
+        assert!(!allows("none", "visible", "1"));
+        assert!(!allows("block", "hidden", "1"));
+        assert!(!allows("block", "collapse", "1"));
+        assert!(!allows("block", "visible", "0"));
+        assert!(allows("block", "visible", "0.01"));
     }
 
     #[test]
