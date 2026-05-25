@@ -1145,6 +1145,188 @@ fn visible(element: &Element) -> bool {
     rect.width() > 0.0 && rect.height() > 0.0
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RectBounds {
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+}
+
+impl RectBounds {
+    fn width(self) -> f64 {
+        self.right - self.left
+    }
+
+    fn height(self) -> f64 {
+        self.bottom - self.top
+    }
+}
+
+fn hint_rect_is_usable(rect: RectBounds) -> bool {
+    rect.width() >= 3.0 && rect.height() >= 3.0
+}
+
+fn crop_rect_to_viewport(
+    rect: RectBounds,
+    viewport_width: f64,
+    viewport_height: f64,
+) -> Option<RectBounds> {
+    let cropped = RectBounds {
+        left: rect.left.max(0.0),
+        top: rect.top.max(0.0),
+        right: rect.right.min(viewport_width),
+        bottom: rect.bottom.min(viewport_height),
+    };
+    hint_rect_is_usable(cropped).then_some(cropped)
+}
+
+fn hint_style_allows_target(display: &str, visibility: &str) -> bool {
+    display != "none" && visibility == "visible"
+}
+
+fn element_style_allows_hint(element: &Element) -> bool {
+    let Some(window) = win() else {
+        return false;
+    };
+    let Ok(Some(style)) = window.get_computed_style(element) else {
+        return false;
+    };
+    let display = style.get_property_value("display").unwrap_or_default();
+    let visibility = style.get_property_value("visibility").unwrap_or_default();
+    hint_style_allows_target(&display, &visibility)
+}
+
+fn rect_bounds(rect: &web_sys::DomRect) -> RectBounds {
+    RectBounds {
+        left: rect.left(),
+        top: rect.top(),
+        right: rect.right(),
+        bottom: rect.bottom(),
+    }
+}
+
+fn viewport_bounds() -> Option<(f64, f64)> {
+    let window = win()?;
+    Some((
+        window.inner_width().ok()?.as_f64()?,
+        window.inner_height().ok()?.as_f64()?,
+    ))
+}
+
+fn element_contains(container: &Element, child: &Element) -> bool {
+    let Ok(method) = js_sys::Reflect::get(container.as_ref(), &JsValue::from_str("contains"))
+        .and_then(|value| value.dyn_into::<js_sys::Function>())
+    else {
+        return false;
+    };
+    method
+        .call1(container.as_ref(), child.as_ref())
+        .ok()
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+fn hit_matches_target(target: &Element, hit: &Element) -> bool {
+    js_sys::Object::is(target.as_ref(), hit.as_ref())
+        || element_contains(target, hit)
+        || element_contains(hit, target)
+}
+
+fn element_from_point(document: &Document, x: f64, y: f64) -> Option<Element> {
+    let method = js_sys::Reflect::get(document.as_ref(), &JsValue::from_str("elementFromPoint"))
+        .ok()?
+        .dyn_into::<js_sys::Function>()
+        .ok()?;
+    method
+        .call2(
+            document.as_ref(),
+            &JsValue::from_f64(x),
+            &JsValue::from_f64(y),
+        )
+        .ok()?
+        .dyn_into::<Element>()
+        .ok()
+}
+
+fn elements_from_point_contains(document: &Document, target: &Element, x: f64, y: f64) -> bool {
+    if let Ok(method) =
+        js_sys::Reflect::get(document.as_ref(), &JsValue::from_str("elementsFromPoint"))
+            .and_then(|value| value.dyn_into::<js_sys::Function>())
+    {
+        if let Ok(values) = method.call2(
+            document.as_ref(),
+            &JsValue::from_f64(x),
+            &JsValue::from_f64(y),
+        ) {
+            let elements = js_sys::Array::from(&values);
+            for value in elements.iter() {
+                if let Ok(hit) = value.dyn_into::<Element>() {
+                    if hit_matches_target(target, &hit) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+    }
+    element_from_point(document, x, y)
+        .as_ref()
+        .is_some_and(|hit| hit_matches_target(target, hit))
+}
+
+fn hint_rect_is_reachable(document: &Document, target: &Element, rect: RectBounds) -> bool {
+    let left = rect.left + 1.0;
+    let top = rect.top + 1.0;
+    let right = (rect.right - 1.0).max(left);
+    let bottom = (rect.bottom - 1.0).max(top);
+    let center_x = rect.left + rect.width() / 2.0;
+    let center_y = rect.top + rect.height() / 2.0;
+    [
+        (center_x, center_y),
+        (left, top),
+        (right, top),
+        (left, bottom),
+        (right, bottom),
+    ]
+    .into_iter()
+    .any(|(x, y)| elements_from_point_contains(document, target, x, y))
+}
+
+fn hint_rect_for_element(document: &Document, element: &Element) -> Option<RectBounds> {
+    if !element_style_allows_hint(element) {
+        return None;
+    }
+    let (viewport_width, viewport_height) = viewport_bounds()?;
+    let rects = element.get_client_rects();
+    for i in 0..rects.length() {
+        let Some(rect) = rects.item(i) else {
+            continue;
+        };
+        let Some(cropped) =
+            crop_rect_to_viewport(rect_bounds(&rect), viewport_width, viewport_height)
+        else {
+            continue;
+        };
+        if hint_rect_is_reachable(document, element, cropped) {
+            return Some(cropped);
+        }
+    }
+    let children = element.child_nodes();
+    for i in 0..children.length() {
+        let Some(child) = children.item(i) else {
+            continue;
+        };
+        let Ok(child) = child.dyn_into::<Element>() else {
+            continue;
+        };
+        if let Some(rect) = hint_rect_for_element(document, &child) {
+            return Some(rect);
+        }
+    }
+    None
+}
+
 fn element_f64(element: &Element, key: &str) -> f64 {
     js_sys::Reflect::get(element.as_ref(), &JsValue::from_str(key))
         .ok()
@@ -1558,11 +1740,10 @@ fn activate_hints(action: &str) {
         let Ok(target) = node.dyn_into::<Element>() else {
             continue;
         };
-        if !visible(&target) {
+        let Some(rect) = hint_rect_for_element(&document, &target) else {
             continue;
-        }
-        let rect = target.get_bounding_client_rect();
-        targets.push((target, rect.left(), rect.top()));
+        };
+        targets.push((target, rect.left, rect.top));
     }
     let labels = hint_labels_with_chars(targets.len(), &chars);
     let mut hints = Vec::new();
@@ -3697,6 +3878,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn hint_rect_crops_to_viewport_and_rejects_tiny_visible_area() {
+        let rect = RectBounds {
+            left: -10.0,
+            top: 2.0,
+            right: 20.0,
+            bottom: 12.0,
+        };
+        assert_eq!(
+            Some(RectBounds {
+                left: 0.0,
+                top: 2.0,
+                right: 20.0,
+                bottom: 12.0,
+            }),
+            crop_rect_to_viewport(rect, 100.0, 100.0)
+        );
+
+        let tiny = RectBounds {
+            left: 0.0,
+            top: 0.0,
+            right: 2.5,
+            bottom: 10.0,
+        };
+        assert_eq!(None, crop_rect_to_viewport(tiny, 100.0, 100.0));
+    }
+
+    #[test]
+    fn hint_style_excludes_display_and_visibility_but_not_opacity() {
+        assert!(!hint_style_allows_target("none", "visible"));
+        assert!(!hint_style_allows_target("block", "hidden"));
+        assert!(!hint_style_allows_target("block", "collapse"));
+        assert!(hint_style_allows_target("block", "visible"));
     }
 
     #[test]
