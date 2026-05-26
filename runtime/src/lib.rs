@@ -824,6 +824,10 @@ fn is_editable_target(target: Option<web_sys::EventTarget>) -> bool {
         || matches!(tag.as_str(), "input" | "textarea" | "select")
 }
 
+fn should_handle_editable_new_tab_key(url: &str, key: &str, editable: bool) -> bool {
+    editable && key == "t" && url.ends_with("/pages/new-tab.html")
+}
+
 fn setting_value(key: &str, fallback: Value) -> Value {
     CONTENT_STATE.with(|state| {
         state
@@ -2999,6 +3003,13 @@ fn handle_content_keydown(event: KeyboardEvent, editable: bool) {
         let state = &state.borrow().key_state;
         to_js(json!({"mode": state.mode, "sequence": state.sequence, "countText": state.count_text, "input": state.input})).unwrap_or(JsValue::NULL)
     });
+    let editable =
+        if should_handle_editable_new_tab_key(&location_href().unwrap_or_default(), &key, editable)
+        {
+            false
+        } else {
+            editable
+        };
     let Ok(result_js) = content_key(state_js, &key, editable) else {
         return;
     };
@@ -4019,5 +4030,24 @@ mod tests {
         assert!(cancel_new_tab_bang(&mut active));
         assert!(active.is_none());
         assert!(!cancel_new_tab_bang(&mut active));
+    }
+
+    #[test]
+    fn new_tab_search_allows_create_tab_key() {
+        assert!(should_handle_editable_new_tab_key(
+            "chrome-extension://abc/pages/new-tab.html",
+            "t",
+            true
+        ));
+        assert!(!should_handle_editable_new_tab_key(
+            "https://example.com",
+            "t",
+            true
+        ));
+        assert!(!should_handle_editable_new_tab_key(
+            "chrome-extension://abc/pages/new-tab.html",
+            "x",
+            true
+        ));
     }
 }

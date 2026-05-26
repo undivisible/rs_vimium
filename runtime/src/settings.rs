@@ -41,9 +41,7 @@ pub fn default_settings() -> Value {
         "hideHud": false,
         "hideUpdateNotifications": false,
         "userDefinedLinkHintCss": "div > .vimiumHintMarker {\nbackground: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#FFF785), color-stop(100%,#FFC542));\nborder: 1px solid #E3BE23;\n}\n\ndiv > .vimiumHintMarker span {\ncolor: black;\nfont-weight: bold;\nfont-size: 12px;\n}\n\ndiv > .vimiumHintMarker > .matchingCharacter {\n}",
-        "exclusionRules": [
-            { "passKeys": "", "pattern": "https?://mail.google.com/*" }
-        ],
+        "exclusionRules": [],
         "previousPatterns": "prev,previous,back,older,<,\u{2039},\u{2190},\u{00ab},\u{226a},<<",
         "nextPatterns": "next,more,newer,>,\u{203a},\u{2192},\u{00bb},\u{226b},>>",
         "searchUrl": "https://www.google.com/search?q=",
@@ -623,6 +621,18 @@ mod tests {
                 pass_keys: String::new()
             },
             enabled_state_for_url("http://www.twitter.com/pages", &rules)
+        );
+    }
+
+    #[test]
+    fn defaults_do_not_exclude_gmail() {
+        let settings = UserSettings::new();
+        assert_eq!(
+            settings.enabled_state_for_url("https://mail.google.com/mail/u/0/#inbox"),
+            ExclusionState {
+                is_enabled_for_url: true,
+                pass_keys: String::new()
+            }
         );
     }
 

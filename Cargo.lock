@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "crepuscularity-core"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "sha2",
  "toml",
@@ -61,7 +61,7 @@ dependencies = [
 
 [[package]]
 name = "crepuscularity-web"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "base64",
  "crepuscularity-core",
