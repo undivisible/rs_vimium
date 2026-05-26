@@ -319,6 +319,9 @@ pub fn prune_defaults(settings: &Value) -> Value {
         Value::Object(map) => {
             let mut pruned = serde_json::Map::new();
             for (k, v) in map {
+                if k == "enabled" {
+                    continue;
+                }
                 if let Some(dv) = defaults.get(k) {
                     if v != dv {
                         pruned.insert(k.clone(), v.clone());
@@ -633,6 +636,20 @@ mod tests {
                 is_enabled_for_url: true,
                 pass_keys: String::new()
             }
+        );
+    }
+
+    #[test]
+    fn prune_defaults_removes_persisted_enabled_flag() {
+        let settings = json!({
+            "enabled": false,
+            "smoothScroll": false
+        });
+        assert_eq!(
+            prune_defaults(&settings),
+            json!({
+                "smoothScroll": false
+            })
         );
     }
 
