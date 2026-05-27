@@ -442,3 +442,75 @@ pub async fn activate_edge_tab(last: bool) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_options_from_args() {
+        let args = json!({"options": {"key": "val"}});
+        let opts = command_options(&args);
+        assert_eq!(opts.get("key").and_then(Value::as_str), Some("val"));
+    }
+
+    #[test]
+    fn command_options_from_nested_args() {
+        let args = json!({"args": {"options": {"key": "val"}}});
+        let opts = command_options(&args);
+        assert_eq!(opts.get("key").and_then(Value::as_str), Some("val"));
+    }
+
+    #[test]
+    fn command_options_returns_null_when_missing() {
+        assert!(command_options(&json!({})).is_null());
+    }
+
+    #[test]
+    fn command_arg_reads_direct_and_nested() {
+        let args = json!({"count": 5, "args": {"hard": true}});
+        assert_eq!(command_arg(&args, "count").and_then(Value::as_i64), Some(5));
+        assert_eq!(command_arg(&args, "hard").and_then(Value::as_bool), Some(true));
+        assert_eq!(command_arg(&args, "missing"), None);
+    }
+
+    #[test]
+    fn command_count_defaults_to_one() {
+        assert_eq!(command_count(&json!({})), 1);
+        assert_eq!(command_count(&json!({"count": 0})), 1);
+        assert_eq!(command_count(&json!({"count": -5})), 1);
+        assert_eq!(command_count(&json!({"count": 3})), 3);
+    }
+
+    #[test]
+    fn option_bool_returns_false_by_default() {
+        assert!(!option_bool(&json!({}), "flag"));
+        assert!(!option_bool(&json!({"flag": false}), "flag"));
+        assert!(option_bool(&json!({"flag": true}), "flag"));
+    }
+
+    #[test]
+    fn first_url_option_finds_urls_in_options() {
+        let opts = json!({"https://example.com": true, "window": true});
+        assert_eq!(first_url_option(&opts), Some("https://example.com".to_string()));
+    }
+
+    #[test]
+    fn first_url_option_finds_about_urls() {
+        let opts = json!({"about:blank": true, "position": "start"});
+        assert_eq!(first_url_option(&opts), Some("about:blank".to_string()));
+    }
+
+    #[test]
+    fn first_url_option_skips_false_flags() {
+        let opts = json!({"https://example.com": false});
+        assert_eq!(first_url_option(&opts), None);
+    }
+
+    #[test]
+    fn resolve_new_tab_url_keeps_absolute_urls() {
+        assert_eq!(resolve_new_tab_url("https://example.com"), "https://example.com");
+        assert_eq!(resolve_new_tab_url("http://example.com/path"), "http://example.com/path");
+        assert_eq!(resolve_new_tab_url("about:blank"), "about:blank");
+    }
+}

@@ -835,7 +835,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
     ]
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "command table builder with explicit positional args for readability")]
 fn c(
     name: &str,
     desc: &str,
@@ -861,7 +861,7 @@ fn c(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "command table builder with details arg for long descriptions")]
 fn cd(
     name: &str,
     desc: &str,
@@ -889,7 +889,7 @@ fn cd(
     entry
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "command table builder — advanced variant always sets advanced=true")]
 fn ca(
     name: &str,
     desc: &str,
@@ -916,7 +916,7 @@ fn ca(
     entry
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "command table builder — advanced variant with details for long descriptions")]
 fn cad(
     name: &str,
     desc: &str,

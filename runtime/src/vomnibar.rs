@@ -80,17 +80,14 @@ pub async fn query_vomnibar(query: &str, mode: VomnibarMode) -> Result<Completio
 
     match mode {
         VomnibarMode::Full => {
-            match query_bookmarks(query).await {
-                Ok(bm) => items.extend(bm),
-                Err(_) => {}
+            if let Ok(bm) = query_bookmarks(query).await {
+                items.extend(bm);
             }
-            match query_history(query).await {
-                Ok(hist) => items.extend(hist),
-                Err(_) => {}
+            if let Ok(hist) = query_history(query).await {
+                items.extend(hist);
             }
-            match query_tabs(query).await {
-                Ok(tabs_items) => items.extend(tabs_items),
-                Err(_) => {}
+            if let Ok(tabs_items) = query_tabs(query).await {
+                items.extend(tabs_items);
             }
         }
         VomnibarMode::Bookmarks => {
@@ -156,9 +153,10 @@ async fn query_history(query: &str) -> Result<Vec<CompletionItem>, String> {
     Ok(results
         .into_iter()
         .filter_map(|item| {
+            let url = item.url?;
             Some(CompletionItem {
                 title: item.title.unwrap_or_default(),
-                url: item.url?,
+                url,
                 kind: "history".to_string(),
                 relevance: 0.0,
                 id: None,
@@ -322,3 +320,190 @@ pub fn resolve_navigable(query: &str, engines: &SearchEngines) -> Value {
 
     json!({"kind": "url", "url": with_scheme})
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::UserSettings;
+
+    fn make_settings(engines_text: &str) -> UserSettings {
+        let mut s = UserSettings::new();
+        s.merge(json!({"searchEngines": engines_text}));
+        s
+    }
+
+    #[test]
+    fn urlencode_keeps_alphanumeric_and_safe_chars() {
+        assert_eq!(urlencode("hello"), "hello");
+        assert_eq!(urlencode("test-1_2.3~"), "test-1_2.3~");
+    }
+
+    #[test]
+    fn urlencode_encodes_spaces_and_special_chars() {
+        assert_eq!(urlencode("hello world"), "hello%20world");
+        assert_eq!(urlencode("a/b=c"), "a%2Fb%3Dc");
+        assert_eq!(urlencode("русский"), "%D1%80%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9");
+    }
+
+    #[test]
+    fn search_engine_resolve_uses_google_by_default() {
+        let engines = SearchEngines {
+            google: "https://google.com/search?q=%s".to_string(),
+            custom: vec![],
+        };
+        assert_eq!(
+            engines.resolve("hello world"),
+            ("https://google.com/search?q=hello%20world".to_string(), "hello world".to_string())
+        );
+    }
+
+    #[test]
+    fn search_engine_resolve_uses_custom_keyword() {
+        let engines = SearchEngines {
+            google: "https://google.com/search?q=%s".to_string(),
+            custom: vec![
+                ("w".to_string(), "https://en.wikipedia.org/wiki/%s".to_string(), "Wikipedia".to_string()),
+            ],
+        };
+        assert_eq!(
+            engines.resolve("w:rust"),
+            ("https://en.wikipedia.org/wiki/rust".to_string(), "w:rust".to_string())
+        );
+    }
+
+    #[test]
+    fn search_engine_resolve_falls_back_when_keyword_not_found() {
+        let engines = SearchEngines {
+            google: "https://google.com/search?q=%s".to_string(),
+            custom: vec![("w".to_string(), "https://wiki/%s".to_string(), "Wiki".to_string())],
+        };
+        let (url, _) = engines.resolve("x:test");
+        assert!(url.contains("google.com"));
+    }
+
+    #[test]
+    fn is_search_query_rejects_urls_with_dots() {
+        assert!(SearchEngines::is_search_query("cargo"));
+        assert!(SearchEngines::is_search_query("rust-wasm"));
+        assert!(!SearchEngines::is_search_query("example.com"));
+        assert!(!SearchEngines::is_search_query("https://x"));
+        assert!(!SearchEngines::is_search_query("hello world"));
+    }
+
+    #[test]
+    fn scored_items_ranks_by_title_and_url_match() {
+        let items = vec![
+            CompletionItem { title: "Rust Book".into(), url: "https://doc.rust-lang.org/book".into(), kind: "history".into(), relevance: 0.0, id: None },
+            CompletionItem { title: "Rust By Example".into(), url: "https://doc.rust-lang.org/rust-by-example".into(), kind: "history".into(), relevance: 0.0, id: None },
+            CompletionItem { title: "Python Docs".into(), url: "https://docs.python.org".into(), kind: "history".into(), relevance: 0.0, id: None },
+        ];
+        let scored = scored_items(items, "rust");
+        assert!(!scored.is_empty());
+        assert!(scored.iter().all(|item| item.relevance > 0.0));
+        assert_eq!(scored.len(), 2);
+        let titles: Vec<&str> = scored.iter().map(|i| i.title.as_str()).collect();
+        assert!(titles.contains(&"Rust Book"));
+        assert!(titles.contains(&"Rust By Example"));
+        assert!(scored[0].relevance >= scored[1].relevance);
+    }
+
+    #[test]
+    fn scored_items_deduplicates_by_url_keeping_higher_scored() {
+        let items = vec![
+            CompletionItem { title: "Site".into(), url: "https://docs.rs".into(), kind: "history".into(), relevance: 0.0, id: None },
+            CompletionItem { title: "Rust Docs".into(), url: "https://docs.rs".into(), kind: "bookmark".into(), relevance: 0.0, id: None },
+        ];
+        let scored = scored_items(items, "rust");
+        assert_eq!(scored.len(), 1);
+        assert_eq!(scored[0].title, "Rust Docs");
+    }
+
+    #[test]
+    fn scored_items_keeps_tab_on_dedup_tie() {
+        let items = vec![
+            CompletionItem { title: "Tab Page".into(), url: "https://example.com".into(), kind: "tab".into(), relevance: 0.0, id: Some(5) },
+            CompletionItem { title: "History Page".into(), url: "https://example.com".into(), kind: "history".into(), relevance: 0.0, id: None },
+        ];
+        let scored = scored_items(items, "page");
+        assert_eq!(scored.len(), 1);
+        assert_eq!(scored[0].kind, "tab");
+    }
+
+    #[test]
+    fn scored_items_limits_to_15() {
+        let items = (0..30)
+            .map(|i| CompletionItem {
+                title: format!("Page {}", i),
+                url: format!("https://example.com/{}", i),
+                kind: "history".into(),
+                relevance: (30 - i) as f64,
+                id: None,
+            })
+            .collect();
+        let scored = scored_items(items, "");
+        assert_eq!(scored.len(), 15);
+    }
+
+    #[test]
+    fn resolve_navigable_empty_query_is_none() {
+        let engines = SearchEngines {
+            google: "https://google.com/search?q=%s".into(),
+            custom: vec![],
+        };
+        assert_eq!(resolve_navigable("", &engines), json!({"kind": "none"}));
+    }
+
+    #[test]
+    fn resolve_navigable_with_scheme_is_direct_url() {
+        let engines = SearchEngines {
+            google: "https://google.com/search?q=%s".into(),
+            custom: vec![],
+        };
+        let r = resolve_navigable("https://example.com/path", &engines);
+        assert_eq!(r["kind"], "url");
+        assert_eq!(r["url"], "https://example.com/path");
+    }
+
+    #[test]
+    fn resolve_navigable_adds_https_for_url_like_queries() {
+        let engines = SearchEngines {
+            google: "https://google.com/search?q=%s".into(),
+            custom: vec![],
+        };
+        let r = resolve_navigable("example.com/path", &engines);
+        assert_eq!(r["kind"], "url");
+        assert_eq!(r["url"], "https://example.com/path");
+    }
+
+    #[test]
+    fn resolve_navigable_uses_custom_engine_keyword() {
+        let engines = SearchEngines {
+            google: "https://google.com/search?q=%s".into(),
+            custom: vec![("gh".into(), "https://github.com/search?q=%s".into(), "GitHub".into())],
+        };
+        let r = resolve_navigable("gh:rust", &engines);
+        assert_eq!(r["kind"], "url");
+        assert_eq!(r["url"], "https://github.com/search?q=rust");
+    }
+
+    #[test]
+    fn resolve_navigable_searches_single_words() {
+        let engines = SearchEngines {
+            google: "https://google.com/search?q=%s".into(),
+            custom: vec![],
+        };
+        let r = resolve_navigable("cargo", &engines);
+        assert_eq!(r["kind"], "url");
+        assert!(r["url"].as_str().unwrap().starts_with("https://google.com/search?q="));
+    }
+
+    #[test]
+    fn search_engines_from_settings_parses_custom_engines() {
+        let s = make_settings("w: https://en.wikipedia.org/w/index.php?search=%s Wikipedia\ngh: https://github.com/search?q=%s GitHub");
+        let engines = SearchEngines::from_settings(&s);
+        assert_eq!(engines.custom.len(), 2);
+        assert!(engines.custom.iter().any(|(k, _, _)| k == "w"));
+        assert!(engines.custom.iter().any(|(k, _, _)| k == "gh"));
+    }
+}
+

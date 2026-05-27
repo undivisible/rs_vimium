@@ -246,11 +246,10 @@ pub fn enabled_state_for_url(url: &str, rules: &[ExclusionRule]) -> ExclusionSta
 }
 
 fn distinct_characters(text: &str) -> String {
-    let mut seen = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     let mut result = String::new();
     for ch in text.chars() {
-        if !seen.contains(&ch) {
-            seen.push(ch);
+        if seen.insert(ch) {
             result.push(ch);
         }
     }

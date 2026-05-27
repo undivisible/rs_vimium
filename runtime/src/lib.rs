@@ -1992,7 +1992,7 @@ fn show_vomnibar(mode: &str, new_tab: bool, prefill: String) {
     let Some(input) = input else {
         return;
     };
-    input.set_placeholder(&placeholder);
+    input.set_placeholder(placeholder);
     let Some(list) = list else {
         return;
     };
@@ -4212,7 +4212,10 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
             if id == "newTabBgImageUpload" {
                 if let Some(file_input) = target.dyn_ref::<HtmlInputElement>() {
                     if let Some(file) = file_input.files().and_then(|files| files.item(0)) {
-                        let reader = FileReader::new().unwrap();
+                        let reader = match FileReader::new() {
+                            Ok(r) => r,
+                            Err(_) => return,
+                        };
                         let reader_for = reader.clone();
                         let doc_for = doc_for_change.clone();
                         let onload = Closure::<dyn FnMut()>::wrap(Box::new(move || {
