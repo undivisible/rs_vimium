@@ -222,6 +222,14 @@
   background: #e0e0e0;
   color: #000;
 }
+.vc-vomnibar-selected .vc-vomnibar-title,
+.vc-vomnibar-item:hover .vc-vomnibar-title {
+  color: #000;
+}
+.vc-vomnibar-selected .vc-vomnibar-url,
+.vc-vomnibar-item:hover .vc-vomnibar-url {
+  color: #000;
+}
 .vc-vomnibar-title {
   font-size: 12px;
   color: inherit;
@@ -299,6 +307,10 @@
   .vc-vomnibar-clear { color: #e0e0e0; }
   .vc-vomnibar-item { border-color: #333; }
   .vc-vomnibar-item:hover, .vc-vomnibar-selected { background: #e0e0e0; color: #1a1a1a; }
+  .vc-vomnibar-selected .vc-vomnibar-title,
+  .vc-vomnibar-item:hover .vc-vomnibar-title,
+  .vc-vomnibar-selected .vc-vomnibar-url,
+  .vc-vomnibar-item:hover .vc-vomnibar-url { color: #1a1a1a; }
   .vc-vomnibar-title { color: #e0e0e0; }
   .vc-vomnibar-url { opacity: .6; }
   ::highlight(rs-vimium-find) { background: #444; color: #e0e0e0; }
