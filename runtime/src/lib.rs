@@ -3421,8 +3421,8 @@ pub fn new_tab_main() {
                 }
                 return;
             }
+            setup_new_tab(&doc2, &win2, &settings);
         }
-        setup_new_tab(&doc2, &win2);
     });
 }
 
@@ -3640,16 +3640,20 @@ fn new_tab_bang_state(query: &str) -> Option<NewTabBangState> {
         })
 }
 
-fn new_tab_resolve_url_with_bang(query: &str, active_bang: Option<&NewTabBangState>) -> String {
+fn new_tab_resolve_url_with_bang(
+    query: &str,
+    active_bang: Option<&NewTabBangState>,
+    search_engine_url: &str,
+) -> String {
     let trimmed = query.trim();
     if let Some(bang) = active_bang {
         return bang.url.replace("%s", &encode_new_tab_query(trimmed));
     }
     if trimmed.is_empty() {
-        return "https://duckduckgo.com/".into();
+        return search_engine_url.replace("%s", "");
     }
     if let Some(bang) = new_tab_bang_state(trimmed) {
-        return new_tab_resolve_url_with_bang(&bang.query, Some(&bang));
+        return new_tab_resolve_url_with_bang(&bang.query, Some(&bang), search_engine_url);
     }
     if trimmed.starts_with("http://")
         || trimmed.starts_with("https://")
@@ -3662,10 +3666,7 @@ fn new_tab_resolve_url_with_bang(query: &str, active_bang: Option<&NewTabBangSta
     if trimmed.contains('.') && !trimmed.contains(' ') {
         return format!("https://{trimmed}");
     }
-    format!(
-        "https://duckduckgo.com/?q={}",
-        encode_new_tab_query(trimmed)
-    )
+    search_engine_url.replace("%s", &encode_new_tab_query(trimmed))
 }
 
 fn apply_new_tab_bang_state(
@@ -3683,7 +3684,10 @@ fn apply_new_tab_bang_state(
         let _ = shell.class_list().remove_1("is-searching");
         let _ = shell.remove_attribute("style");
         label.set_inner_html("");
-        let _ = input.set_attribute("placeholder", "Search DuckDuckGo or enter a URL");
+        let original = input.get_attribute("data-placeholder").unwrap_or_default();
+        if !original.is_empty() {
+            let _ = input.set_attribute("placeholder", &original);
+        }
     }
 }
 
@@ -3772,45 +3776,160 @@ fn apply_new_tab_preferences(document: &Document, show_clock: bool, show_bookmar
     }
 }
 
+fn apply_new_tab_appearance(
+    document: &Document,
+    dark_input: bool,
+    accent_color: &str,
+    bg_type: &str,
+    bg_color: &str,
+    bg_image_url: &str,
+) {
+    use web_sys::HtmlElement;
+
+    let Some(main_el) = document.query_selector("main").ok().flatten() else { return };
+    let Some(main_html) = main_el.dyn_ref::<HtmlElement>() else { return };
+    let Some(shell) = document.get_element_by_id("search-shell") else { return };
+
+    if dark_input {
+        let _ = shell.class_list().add_1("dark-input");
+    } else {
+        let _ = shell.class_list().remove_1("dark-input");
+    }
+
+    if !accent_color.is_empty() {
+        let _ = main_html.style().set_property("--accent", accent_color);
+    } else {
+        let _ = main_html.style().remove_property("--accent");
+    }
+
+    match bg_type {
+        "color" => {
+            if !bg_color.is_empty() {
+                let _ = main_html.style().set_property("background-color", bg_color);
+            }
+            let _ = main_html.style().remove_property("background-image");
+        }
+        "image" => {
+            let _ = main_html.style().set_property("background-size", "cover");
+            let _ = main_html.style().set_property("background-position", "center");
+            if !bg_image_url.is_empty() {
+                let _ = main_html
+                    .style()
+                    .set_property("background-image", &format!("url({})", bg_image_url));
+            } else {
+                let doc = document.clone();
+                spawn_local(async move {
+                    let stored = storage::local()
+                        .get_json(Value::Null)
+                        .await
+                        .unwrap_or_default();
+                    if let Some(data) = stored
+                        .get("newTabBgImageData")
+                        .and_then(Value::as_str)
+                    {
+                        if !data.is_empty() {
+                            if let Some(m) = doc.query_selector("main").ok().flatten() {
+                                if let Some(mh) = m.dyn_ref::<HtmlElement>() {
+                                    let _ = mh
+                                        .style()
+                                        .set_property("background-image", &format!("url({})", data));
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        _ => {
+            let _ = main_html.style().remove_property("background-color");
+            let _ = main_html.style().remove_property("background-image");
+            let _ = main_html.style().remove_property("background-size");
+            let _ = main_html.style().remove_property("background-position");
+        }
+    }
+}
+
 fn install_new_tab_preferences(document: &Document, window: &Window) {
-    let clock_input = document
+    use web_sys::{FileReader, HtmlInputElement, HtmlSelectElement};
+
+    let Some(clock_input) = document
         .get_element_by_id("show-clock")
-        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok());
-    let bookmarks_input = document
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+    else { return };
+    let Some(bookmarks_input) = document
         .get_element_by_id("show-bookmarks")
-        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok());
-    let Some(clock_input) = clock_input else {
-        return;
-    };
-    let Some(bookmarks_input) = bookmarks_input else {
-        return;
-    };
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+    else { return };
 
     install_new_tab_clock(document, window);
     load_new_tab_bookmarks(document.clone());
 
-    let document_for_load = document.clone();
+    let doc_for_load = document.clone();
     let clock_for_load = clock_input.clone();
     let bookmarks_for_load = bookmarks_input.clone();
     spawn_local(async move {
         let stored = storage::sync()
             .get_json(json!({
                 "newTabShowClock": false,
-                "newTabShowBookmarks": false
+                "newTabShowBookmarks": false,
+                "newTabSearchEngine": "duckduckgo",
+                "newTabSearchEngineUrl": "",
+                "newTabDarkInput": false,
+                "newTabAccentColor": "",
+                "newTabBgType": "none",
+                "newTabBgColor": "",
+                "newTabBgImageUrl": ""
             }))
             .await
             .unwrap_or_default();
-        let show_clock = stored
-            .get("newTabShowClock")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let show_bookmarks = stored
-            .get("newTabShowBookmarks")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+
+        let show_clock = stored.get("newTabShowClock").and_then(Value::as_bool).unwrap_or(false);
+        let show_bookmarks = stored.get("newTabShowBookmarks").and_then(Value::as_bool).unwrap_or(false);
+        let engine = stored.get("newTabSearchEngine").and_then(Value::as_str).unwrap_or("duckduckgo").to_string();
+        let engine_url = stored.get("newTabSearchEngineUrl").and_then(Value::as_str).unwrap_or("").to_string();
+        let dark = stored.get("newTabDarkInput").and_then(Value::as_bool).unwrap_or(false);
+        let accent = stored.get("newTabAccentColor").and_then(Value::as_str).unwrap_or("").to_string();
+        let bg_type = stored.get("newTabBgType").and_then(Value::as_str).unwrap_or("none").to_string();
+        let bg_color = stored.get("newTabBgColor").and_then(Value::as_str).unwrap_or("").to_string();
+        let bg_url = stored.get("newTabBgImageUrl").and_then(Value::as_str).unwrap_or("").to_string();
+
         clock_for_load.set_checked(show_clock);
         bookmarks_for_load.set_checked(show_bookmarks);
-        apply_new_tab_preferences(&document_for_load, show_clock, show_bookmarks);
+
+        if let Some(el) = doc_for_load.get_element_by_id("newTabSearchEngine").and_then(|e| e.dyn_into::<HtmlSelectElement>().ok()) {
+            el.set_value(&engine);
+        }
+        if let Some(el) = doc_for_load.get_element_by_id("newTabSearchEngineUrl").and_then(|e| e.dyn_into::<HtmlInputElement>().ok()) {
+            el.set_value(&engine_url);
+        }
+        if let Some(el) = doc_for_load.get_element_by_id("newTabDarkInput").and_then(|e| e.dyn_into::<HtmlInputElement>().ok()) {
+            el.set_checked(dark);
+        }
+        if let Some(el) = doc_for_load.get_element_by_id("newTabAccentColor").and_then(|e| e.dyn_into::<HtmlInputElement>().ok()) {
+            el.set_value(&accent);
+        }
+        if let Some(el) = doc_for_load.get_element_by_id("newTabBgType").and_then(|e| e.dyn_into::<HtmlSelectElement>().ok()) {
+            el.set_value(&bg_type);
+        }
+        if let Some(el) = doc_for_load.get_element_by_id("newTabBgColor").and_then(|e| e.dyn_into::<HtmlInputElement>().ok()) {
+            el.set_value(&bg_color);
+        }
+        if let Some(el) = doc_for_load.get_element_by_id("newTabBgImageUrl").and_then(|e| e.dyn_into::<HtmlInputElement>().ok()) {
+            el.set_value(&bg_url);
+        }
+
+        if let Some(row) = doc_for_load.get_element_by_id("newTabSearchEngineUrlRow") {
+            set_element_hidden(&row, engine != "custom");
+        }
+        if let Some(row) = doc_for_load.get_element_by_id("newTabBgColorRow") {
+            set_element_hidden(&row, bg_type != "color");
+        }
+        if let Some(row) = doc_for_load.get_element_by_id("newTabBgImageUrlRow") {
+            set_element_hidden(&row, bg_type != "image");
+        }
+
+        apply_new_tab_preferences(&doc_for_load, show_clock, show_bookmarks);
+        apply_new_tab_appearance(&doc_for_load, dark, &accent, &bg_type, &bg_color, &bg_url);
     });
 
     let install_toggle = |input: HtmlInputElement, key: &'static str, document: Document| {
@@ -3842,6 +3961,165 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
 
     install_toggle(clock_input, "newTabShowClock", document.clone());
     install_toggle(bookmarks_input, "newTabShowBookmarks", document.clone());
+
+    let doc_for_change = document.clone();
+    let change_closure = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
+        let Some(target) = ev.target().and_then(|t| t.dyn_into::<Element>().ok()) else { return };
+        let id = target.id();
+        if id.is_empty() { return }
+
+        if id == "newTabBgImageUpload" {
+            if let Some(file_input) = target.dyn_ref::<HtmlInputElement>() {
+                if let Some(file) = file_input.files().and_then(|files| files.item(0)) {
+                    let reader = FileReader::new().unwrap();
+                    let reader_for = reader.clone();
+                    let doc_for = doc_for_change.clone();
+                    let onload = Closure::<dyn FnMut()>::wrap(Box::new(move || {
+                        if let Ok(data_url) = reader_for.result() {
+                            let data_str = data_url.as_string().unwrap_or_default();
+                            let doc_for_onload = doc_for.clone();
+                            spawn_local(async move {
+                                let _ = storage::local().set(&json!({"newTabBgImageData": data_str})).await;
+                                apply_new_tab_appearance(&doc_for_onload, false, "", "image", "", "");
+                            });
+                        }
+                    }));
+                    reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+                    let _ = reader.read_as_data_url(&file);
+                    onload.forget();
+                }
+            }
+            return;
+        }
+
+        let doc = doc_for_change.clone();
+
+        spawn_local(async move {
+            let mut changed = false;
+
+            match id.as_str() {
+                "newTabSearchEngine" => {
+                    if let Some(select) = target.dyn_ref::<HtmlSelectElement>() {
+                        let val = select.value();
+                        let mut map = serde_json::Map::new();
+                        map.insert("newTabSearchEngine".to_string(), Value::String(val.clone()));
+                        let _ = storage::sync().set(&Value::Object(map)).await;
+                        if let Some(row) = doc.get_element_by_id("newTabSearchEngineUrlRow") {
+                            set_element_hidden(&row, val != "custom");
+                        }
+                    }
+                }
+                "newTabSearchEngineUrl" => {
+                    if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
+                        let mut map = serde_json::Map::new();
+                        map.insert("newTabSearchEngineUrl".to_string(), Value::String(input.value()));
+                        let _ = storage::sync().set(&Value::Object(map)).await;
+                    }
+                }
+                "newTabDarkInput" => {
+                    if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
+                        let val = input.checked();
+                        let mut map = serde_json::Map::new();
+                        map.insert("newTabDarkInput".to_string(), Value::Bool(val));
+                        let _ = storage::sync().set(&Value::Object(map)).await;
+                        if let Some(shell) = doc.get_element_by_id("search-shell") {
+                            if val {
+                                let _ = shell.class_list().add_1("dark-input");
+                            } else {
+                                let _ = shell.class_list().remove_1("dark-input");
+                            }
+                        }
+                    }
+                }
+                "newTabAccentColor" => {
+                    if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
+                        let val = input.value();
+                        let mut map = serde_json::Map::new();
+                        map.insert("newTabAccentColor".to_string(), Value::String(val.clone()));
+                        let _ = storage::sync().set(&Value::Object(map)).await;
+                        if let Some(main_el) = doc.query_selector("main").ok().flatten() {
+                            if let Some(main_html) = main_el.dyn_ref::<web_sys::HtmlElement>() {
+                                if val.is_empty() {
+                                    let _ = main_html.style().remove_property("--accent");
+                                } else {
+                                    let _ = main_html.style().set_property("--accent", &val);
+                                }
+                            }
+                        }
+                    }
+                }
+                "newTabBgType" => {
+                    if let Some(select) = target.dyn_ref::<HtmlSelectElement>() {
+                        let val = select.value();
+                        let mut map = serde_json::Map::new();
+                        map.insert("newTabBgType".to_string(), Value::String(val.clone()));
+                        let _ = storage::sync().set(&Value::Object(map)).await;
+                        if let Some(row) = doc.get_element_by_id("newTabBgColorRow") {
+                            set_element_hidden(&row, val != "color");
+                        }
+                        if let Some(row) = doc.get_element_by_id("newTabBgImageUrlRow") {
+                            set_element_hidden(&row, val != "image");
+                        }
+                        changed = true;
+                    }
+                }
+                "newTabBgColor" => {
+                    if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
+                        let mut map = serde_json::Map::new();
+                        map.insert("newTabBgColor".to_string(), Value::String(input.value()));
+                        let _ = storage::sync().set(&Value::Object(map)).await;
+                        changed = true;
+                    }
+                }
+                "newTabBgImageUrl" => {
+                    if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
+                        let val = input.value();
+                        let mut map = serde_json::Map::new();
+                        map.insert("newTabBgImageUrl".to_string(), Value::String(val.clone()));
+                        let _ = storage::sync().set(&Value::Object(map)).await;
+                        if let Some(main_el) = doc.query_selector("main").ok().flatten() {
+                            if let Some(main_html) = main_el.dyn_ref::<web_sys::HtmlElement>() {
+                                if val.is_empty() {
+                                    let _ = main_html.style().remove_property("background-image");
+                                } else {
+                                    let _ = main_html.style().set_property("background-size", "cover");
+                                    let _ = main_html.style().set_property("background-position", "center");
+                                    let _ = main_html.style().set_property("background-image", &format!("url({})", val));
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => return,
+            }
+
+            if changed {
+                let dark = doc.get_element_by_id("newTabDarkInput")
+                    .and_then(|e| e.dyn_into::<HtmlInputElement>().ok())
+                    .map(|e| e.checked())
+                    .unwrap_or(false);
+                let accent = doc.get_element_by_id("newTabAccentColor")
+                    .and_then(|e| e.dyn_into::<HtmlInputElement>().ok())
+                    .map(|e| e.value())
+                    .unwrap_or_default();
+                let bg_type = doc.get_element_by_id("newTabBgType")
+                    .and_then(|e| e.dyn_into::<HtmlSelectElement>().ok())
+                    .map(|e| e.value())
+                    .unwrap_or_default();
+                let bg_color = doc.get_element_by_id("newTabBgColor")
+                    .and_then(|e| e.dyn_into::<HtmlInputElement>().ok())
+                    .map(|e| e.value())
+                    .unwrap_or_default();
+                let bg_url = doc.get_element_by_id("newTabBgImageUrl")
+                    .and_then(|e| e.dyn_into::<HtmlInputElement>().ok())
+                    .map(|e| e.value())
+                    .unwrap_or_default();
+                apply_new_tab_appearance(&doc, dark, &accent, &bg_type, &bg_color, &bg_url);
+            }
+        });
+    }));
+    let _ = document.add_event_listener_with_callback("change", change_closure.as_ref().unchecked_ref());
+    change_closure.forget();
 }
 
 fn install_content_tools_css(document: &Document) {
@@ -3890,8 +4168,12 @@ fn focus_new_tab_normal_mode(document: &Document) {
     }
 }
 
-fn setup_new_tab(document: &Document, window: &Window) {
+fn setup_new_tab(document: &Document, window: &Window, settings: &Value) {
     use web_sys::HtmlInputElement;
+
+    let search_engine_url = resolve_search_engine_url(settings);
+    let search_engine_name = search_engine_display_name(settings);
+    let search_engine_url_cell: Rc<RefCell<String>> = Rc::new(RefCell::new(search_engine_url));
 
     let Some(input) = document.get_element_by_id("q") else {
         return;
@@ -3900,7 +4182,9 @@ fn setup_new_tab(document: &Document, window: &Window) {
         return;
     };
 
-    let _ = input_el.set_attribute("placeholder", "Search DuckDuckGo or enter a URL");
+    let placeholder_text = format!("Search {} or enter a URL", search_engine_name);
+    let _ = input_el.set_attribute("placeholder", &placeholder_text);
+    let _ = input_el.set_attribute("data-placeholder", &placeholder_text);
     let _ = input_el.set_attribute("autocomplete", "off");
     let _ = input_el.set_attribute("autocapitalize", "none");
     let _ = input_el.set_attribute("spellcheck", "false");
@@ -3956,6 +4240,7 @@ fn setup_new_tab(document: &Document, window: &Window) {
     let input2 = input_el.clone();
     let win2 = window.clone();
     let active_for_submit = active_bang.clone();
+    let url_cell = search_engine_url_cell.clone();
     if let Some(form) = input_el.form() {
         let closure =
             Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
@@ -3963,7 +4248,7 @@ fn setup_new_tab(document: &Document, window: &Window) {
                 let q = input2.value().trim().to_string();
                 if !q.is_empty() {
                     let active = active_for_submit.borrow();
-                    let url = new_tab_resolve_url_with_bang(&q, active.as_ref());
+                    let url = new_tab_resolve_url_with_bang(&q, active.as_ref(), &url_cell.borrow());
                     let _ = win2.location().set_href(&url);
                 }
             }));
@@ -4053,7 +4338,7 @@ mod tests {
         let state = new_tab_bang_state("!gh rust wasm").unwrap();
         assert_eq!(
             "https://github.com/search?q=rust%20wasm",
-            new_tab_resolve_url_with_bang(&state.query, Some(&state))
+            new_tab_resolve_url_with_bang(&state.query, Some(&state), "https://duckduckgo.com/?q=%s")
         );
     }
 
@@ -4061,7 +4346,7 @@ mod tests {
     fn new_tab_url_falls_back_for_unknown_bang() {
         assert_eq!(
             "https://duckduckgo.com/?q=%21unknown%20rust",
-            new_tab_resolve_url_with_bang("!unknown rust", None)
+            new_tab_resolve_url_with_bang("!unknown rust", None, "https://duckduckgo.com/?q=%s")
         );
     }
 
