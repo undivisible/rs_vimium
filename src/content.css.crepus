@@ -24,6 +24,7 @@
   color: #000;
   font: 500 12px/1.4 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
   white-space: nowrap;
+  animation: vc-slidein .1s ease;
 }
 .vc-overlay {
   position: fixed;
@@ -38,6 +39,7 @@
   background: #fff;
   color: #000;
   font-family: "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  animation: vc-slidein .1s ease;
 }
 .vc-overlay-header {
   display: flex;
@@ -119,6 +121,7 @@
   background: #fff;
   color: #000;
   font-family: "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  animation: vc-slidein .1s ease;
 }
 .vc-find input {
   flex: 1;
@@ -154,6 +157,7 @@
   align-items: flex-start;
   justify-content: center;
   padding-top: 16vh;
+  animation: vc-fadein .12s ease;
 }
 .vc-vomnibar-box {
   width: min(560px, calc(100vw - 32px));
@@ -161,16 +165,39 @@
   border: 1px solid #000;
   overflow: hidden;
 }
+.vc-vomnibar-input-wrap {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #000;
+}
 .vc-vomnibar-input {
   width: 100%;
   box-sizing: border-box;
   border: 0;
-  border-bottom: 1px solid #000;
   background: #fff;
   color: #000;
   font: 500 13px/1.4 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
   padding: 10px 12px;
   outline: none;
+}
+.vc-vomnibar-clear {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: #000;
+  font: 16px/1 sans-serif;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin-right: 4px;
+  opacity: .5;
+}
+.vc-vomnibar-clear:hover {
+  opacity: 1;
 }
 .vc-vomnibar-input::placeholder {
   color: #666;
@@ -192,8 +219,8 @@
 }
 .vc-vomnibar-item:hover,
 .vc-vomnibar-selected {
-  background: #000;
-  color: #fff;
+  background: #e0e0e0;
+  color: #000;
 }
 .vc-vomnibar-title {
   font-size: 12px;
@@ -201,6 +228,15 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.vc-vomnibar-kind {
+  display: inline-block;
+  width: 16px;
+  text-align: center;
+  font-size: 11px;
+  margin-right: 4px;
+  opacity: .6;
+  flex-shrink: 0;
 }
 .vc-vomnibar-url {
   font-size: 11px;
@@ -221,6 +257,14 @@
 }
 .icon.file {
   -webkit-user-select: auto !important;
+}
+@keyframes vc-fadein {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes vc-slidein {
+  from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 @media (max-width: 560px) {
   .vc-overlay-grid {
@@ -249,8 +293,10 @@
   .vc-find-count { background: #e0e0e0; color: #1a1a1a; }
   .vc-vomnibar { background: rgba(26,26,26,.86); }
   .vc-vomnibar-box { background: #1a1a1a; border-color: #555; }
-  .vc-vomnibar-input { background: #1a1a1a; color: #e0e0e0; border-color: #555; }
+  .vc-vomnibar-input-wrap { border-color: #555; }
+  .vc-vomnibar-input { background: #1a1a1a; color: #e0e0e0; }
   .vc-vomnibar-input::placeholder { color: #888; }
+  .vc-vomnibar-clear { color: #e0e0e0; }
   .vc-vomnibar-item { border-color: #333; }
   .vc-vomnibar-item:hover, .vc-vomnibar-selected { background: #e0e0e0; color: #1a1a1a; }
   .vc-vomnibar-title { color: #e0e0e0; }

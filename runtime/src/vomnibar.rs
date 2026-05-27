@@ -1,5 +1,6 @@
 use crepuscularity_webext::wasm::{bookmarks, history, tabs};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 use crate::settings::UserSettings;
 
@@ -57,6 +58,7 @@ pub enum VomnibarMode {
     Full,
     Bookmarks,
     Tabs,
+    Commands,
 }
 
 pub struct CompletionResult {
@@ -70,6 +72,7 @@ pub struct CompletionItem {
     pub url: String,
     pub kind: String,
     pub relevance: f64,
+    pub id: Option<i64>,
 }
 
 pub async fn query_vomnibar(query: &str, mode: VomnibarMode) -> Result<CompletionResult, String> {
@@ -77,18 +80,27 @@ pub async fn query_vomnibar(query: &str, mode: VomnibarMode) -> Result<Completio
 
     match mode {
         VomnibarMode::Full => {
-            let bm = query_bookmarks(query).await?;
-            items.extend(bm);
-            let hist = query_history(query).await?;
-            items.extend(hist);
-            let tabs_items = query_tabs(query).await?;
-            items.extend(tabs_items);
+            match query_bookmarks(query).await {
+                Ok(bm) => items.extend(bm),
+                Err(_) => {}
+            }
+            match query_history(query).await {
+                Ok(hist) => items.extend(hist),
+                Err(_) => {}
+            }
+            match query_tabs(query).await {
+                Ok(tabs_items) => items.extend(tabs_items),
+                Err(_) => {}
+            }
         }
         VomnibarMode::Bookmarks => {
             items = query_bookmarks(query).await?;
         }
         VomnibarMode::Tabs => {
             items = query_tabs(query).await?;
+        }
+        VomnibarMode::Commands => {
+            items = query_commands(query);
         }
     }
 
@@ -100,19 +112,34 @@ pub async fn query_vomnibar(query: &str, mode: VomnibarMode) -> Result<Completio
     })
 }
 
-async fn query_bookmarks(_query: &str) -> Result<Vec<CompletionItem>, String> {
+async fn query_bookmarks(query: &str) -> Result<Vec<CompletionItem>, String> {
     let results = bookmarks::get_recent(200)
         .await
         .map_err(|e| format!("bookmarks: {}", e))?;
     let flat = bookmarks::flatten_tree(&results);
+    let query_lower = query.to_lowercase();
+    let terms: Vec<&str> = if query_lower.is_empty() {
+        vec![]
+    } else {
+        query_lower.split_whitespace().collect()
+    };
     Ok(flat
         .into_iter()
         .filter_map(|node| {
+            let url = node.url?;
+            if !terms.is_empty() {
+                let title_lower = node.title.to_lowercase();
+                let url_lower = url.to_lowercase();
+                if !terms.iter().any(|t| title_lower.contains(t) || url_lower.contains(t)) {
+                    return None;
+                }
+            }
             Some(CompletionItem {
                 title: node.title,
-                url: node.url?,
+                url,
                 kind: "bookmark".to_string(),
                 relevance: 0.0,
+                id: None,
             })
         })
         .collect())
@@ -134,66 +161,134 @@ async fn query_history(query: &str) -> Result<Vec<CompletionItem>, String> {
                 url: item.url?,
                 kind: "history".to_string(),
                 relevance: 0.0,
+                id: None,
             })
         })
         .collect())
 }
 
-async fn query_tabs(_query: &str) -> Result<Vec<CompletionItem>, String> {
+async fn query_tabs(query: &str) -> Result<Vec<CompletionItem>, String> {
     let all = tabs::query(&tabs::QueryInfo {
         ..Default::default()
     })
     .await
     .map_err(|e| format!("tabs: {}", e))?;
+    let query_lower = query.to_lowercase();
+    let terms: Vec<&str> = if query_lower.is_empty() {
+        vec![]
+    } else {
+        query_lower.split_whitespace().collect()
+    };
     Ok(all
         .into_iter()
         .filter_map(|tab| {
+            let url = tab.url?;
+            if !terms.is_empty() {
+                let title_lower = tab.title.as_deref().unwrap_or("").to_lowercase();
+                let url_lower = url.to_lowercase();
+                if !terms.iter().any(|t| title_lower.contains(t) || url_lower.contains(t)) {
+                    return None;
+                }
+            }
             Some(CompletionItem {
                 title: tab.title.unwrap_or_default(),
-                url: tab.url?,
+                url,
                 kind: "tab".to_string(),
                 relevance: 0.0,
+                id: tab.id,
             })
         })
         .collect())
 }
 
+fn query_commands(query: &str) -> Vec<CompletionItem> {
+    let commands = crate::commands::all_commands();
+    let query_lower = query.to_lowercase();
+    let terms: Vec<&str> = if query_lower.is_empty() {
+        vec![]
+    } else {
+        query_lower.split_whitespace().collect()
+    };
+    commands
+        .into_iter()
+        .filter_map(|cmd| {
+            if !terms.is_empty() {
+                let name_lower = cmd.name.to_lowercase();
+                let desc_lower = cmd.desc.to_lowercase();
+                if !terms.iter().any(|t| name_lower.contains(t) || desc_lower.contains(t)) {
+                    return None;
+                }
+            }
+            Some(CompletionItem {
+                title: cmd.desc,
+                url: cmd.name,
+                kind: "command".to_string(),
+                relevance: 0.0,
+                id: None,
+            })
+        })
+        .collect()
+}
+
 pub fn scored_items(items: Vec<CompletionItem>, query: &str) -> Vec<CompletionItem> {
     let query_lower = query.to_lowercase();
-    let mut scored: Vec<CompletionItem> = items
-        .into_iter()
-        .map(|mut item| {
-            let title_lower = item.title.to_lowercase();
-            let url_lower = item.url.to_lowercase();
-            let mut score = 0.0;
+    let terms: Vec<&str> = if query_lower.is_empty() {
+        vec![]
+    } else {
+        query_lower.split_whitespace().collect()
+    };
 
-            let terms: Vec<&str> = query_lower.split_whitespace().collect();
-            for term in &terms {
-                if title_lower.starts_with(term) {
-                    score += 2.0;
-                } else if title_lower.contains(term) {
-                    score += 1.0;
-                }
-                if url_lower.starts_with(term) {
-                    score += 1.5;
-                } else if url_lower.contains(term) {
-                    score += 0.5;
-                }
+    let mut dedup: HashMap<String, CompletionItem> = HashMap::new();
+
+    for mut item in items {
+        let title_lower = item.title.to_lowercase();
+        let url_lower = item.url.to_lowercase();
+        let mut score = terms.iter().map(|term| {
+            let mut s = 0.0;
+            if title_lower.starts_with(term) {
+                s += 2.0;
+            } else if title_lower.contains(term) {
+                s += 1.0;
             }
-            if title_lower == query_lower {
-                score += 3.0;
+            if url_lower.starts_with(term) {
+                s += 1.5;
+            } else if url_lower.contains(term) {
+                s += 0.5;
             }
-            item.relevance = score;
-            item
-        })
-        .collect();
+            s
+        }).sum::<f64>();
+
+        if title_lower == query_lower {
+            score += 3.0;
+        }
+
+        item.relevance = score;
+
+        let url = item.url.clone();
+        let should_insert = match dedup.get(&url) {
+            Some(existing) => {
+                item.relevance > existing.relevance
+                    || (item.relevance == existing.relevance && item.kind == "tab")
+            }
+            None => true,
+        };
+        if should_insert {
+            dedup.insert(url, item);
+        }
+    }
+
+    let mut scored: Vec<CompletionItem> = dedup.into_values().collect();
+
+    if !query_lower.is_empty() {
+        scored.retain(|item| item.relevance > 0.0);
+    }
+
     scored.sort_by(|a, b| {
         b.relevance
             .partial_cmp(&a.relevance)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    scored.truncate(15);
-    scored
+    scored.into_iter().take(15).collect()
 }
 
 pub fn resolve_navigable(query: &str, engines: &SearchEngines) -> Value {

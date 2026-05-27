@@ -295,41 +295,44 @@ pub fn content_key(state_val: JsValue, key: &str, editable: bool) -> Result<JsVa
 #[wasm_bindgen]
 pub fn render_help_overlay(show_advanced: bool) -> String {
     let groups = shortcut_groups_json_val();
-    let mut html = String::from(
-        r#"<div class="vc-overlay-header"><span>rs_vimium shortcuts</span><button class="vc-overlay-close" type="button">Esc</button></div><div class="vc-overlay-grid">"#,
-    );
-    for group in groups.as_array().into_iter().flatten() {
-        let name = group.get("name").and_then(Value::as_str).unwrap_or("");
-        let items = group.get("items").and_then(Value::as_array);
-        if let Some(items) = items {
-            let visible: Vec<_> = items
-                .iter()
-                .filter(|item| {
-                    show_advanced
-                        || !item
-                            .get("advanced")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false)
-                })
-                .collect();
-            if visible.is_empty() {
-                continue;
+    let mut filtered = Vec::new();
+    if let Some(arr) = groups.as_array() {
+        for group in arr {
+            let name = group.get("name").and_then(Value::as_str).unwrap_or("");
+            let items = group.get("items").and_then(Value::as_array);
+            if let Some(items) = items {
+                let visible: Vec<&Value> = items
+                    .iter()
+                    .filter(|item| {
+                        show_advanced
+                            || !item
+                                .get("advanced")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false)
+                    })
+                    .collect();
+                if visible.is_empty() {
+                    continue;
+                }
+                let items_val: Vec<Value> = visible
+                    .iter()
+                    .map(|item| {
+                        json!({
+                            "keys": item.get("keys"),
+                            "label": item.get("label"),
+                        })
+                    })
+                    .collect();
+                filtered.push(json!({
+                    "name": name,
+                    "items": items_val,
+                }));
             }
-            html.push_str(&format!(
-                r#"<div class="vc-group"><div class="vc-group-title">{name}</div>"#
-            ));
-            for item in &visible {
-                let keys = item.get("keys").and_then(Value::as_str).unwrap_or("");
-                let label = item.get("label").and_then(Value::as_str).unwrap_or("");
-                html.push_str(&format!(
-                    r#"<div class="vc-overlay-row"><span class="vc-overlay-key">{keys}</span><span class="vc-overlay-label">{label}</span></div>"#
-                ));
-            }
-            html.push_str("</div>");
         }
     }
-    html.push_str("</div>");
-    html
+    let mut ctx = TemplateContext::new();
+    ctx.set("groups", json_to_template(Value::Array(filtered)));
+    render_component_file_to_html(UI_CREPUS, "HelpOverlay", &ctx).unwrap_or_default()
 }
 
 #[wasm_bindgen]
@@ -423,6 +426,7 @@ pub async fn query_vomnibar(query: &str, mode: &str) -> Result<JsValue, JsValue>
     let mode = match mode {
         "bookmarks" => vomnibar::VomnibarMode::Bookmarks,
         "tabs" => vomnibar::VomnibarMode::Tabs,
+        "commands" => vomnibar::VomnibarMode::Commands,
         _ => vomnibar::VomnibarMode::Full,
     };
     let result = vomnibar::query_vomnibar(query, mode)
@@ -437,6 +441,7 @@ pub async fn query_vomnibar(query: &str, mode: &str) -> Result<JsValue, JsValue>
                 "url": item.url,
                 "kind": item.kind,
                 "relevance": item.relevance,
+                "id": item.id,
             })
         })
         .collect();
@@ -693,6 +698,50 @@ pub async fn handle_background_message(message: JsValue) -> Result<JsValue, JsVa
         "settings:get" => settings_get().await,
         "rs_vimium" | "" => {
             let command = msg.get("command").and_then(Value::as_str).unwrap_or("");
+            if command == "activate-tab" {
+                if let Some(tab_id) = msg.get("tabId").and_then(Value::as_i64) {
+                    let _ = tabs::update(
+                        tab_id,
+                        &tabs::UpdateProperties {
+                            active: Some(true),
+                            ..Default::default()
+                        },
+                    )
+                    .await;
+                }
+                return to_js(json!({"ok": true}));
+            }
+            if command == "query-vomnibar" {
+                let query = msg.get("query").and_then(Value::as_str).unwrap_or("");
+                let mode_str = msg.get("mode").and_then(Value::as_str).unwrap_or("full");
+                let mode = match mode_str {
+                    "bookmarks" => vomnibar::VomnibarMode::Bookmarks,
+                    "tabs" => vomnibar::VomnibarMode::Tabs,
+                    "commands" => vomnibar::VomnibarMode::Commands,
+                    _ => vomnibar::VomnibarMode::Full,
+                };
+                match vomnibar::query_vomnibar(query, mode).await {
+                    Ok(result) => {
+                        let items: Vec<Value> = result
+                            .items
+                            .into_iter()
+                            .map(|item| {
+                                json!({
+                                    "title": item.title,
+                                    "url": item.url,
+                                    "kind": item.kind,
+                                    "relevance": item.relevance,
+                                    "id": item.id,
+                                })
+                            })
+                            .collect();
+                        return to_js(json!({"items": items}));
+                    }
+                    Err(e) => {
+                        return to_js(json!({"items": [], "error": e}));
+                    }
+                }
+            }
             if command == "create-global-mark" {
                 create_global_mark_background(&msg)
                     .await
@@ -1912,11 +1961,24 @@ fn show_vomnibar(mode: &str, new_tab: bool, prefill: String) {
     let Some(document) = doc() else {
         return;
     };
-    let Ok(bar) = document.create_element("div") else {
+    let placeholder = match mode {
+        "bookmarks" => "Search bookmarks",
+        "tabs" => "Search open tabs",
+        "commands" => "Run a Vimium command",
+        _ => "Search bookmarks, history, and tabs",
+    };
+    let html = render_component_file_to_html(UI_CREPUS, "Vomnibar", &TemplateContext::new())
+        .unwrap_or_else(|_| String::new());
+    if html.is_empty() {
+        return;
+    }
+    let Ok(container) = document.create_element("div") else {
         return;
     };
-    bar.set_class_name("vc-vomnibar");
-    bar.set_inner_html(r#"<div class="vc-vomnibar-box"><input class="vc-vomnibar-input" type="search" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Search bookmarks, history, and tabs"><ul class="vc-vomnibar-list"></ul></div>"#);
+    container.set_inner_html(&html);
+    let Some(bar) = container.first_element_child() else {
+        return;
+    };
     if let Some(root) = document.document_element() {
         append(&root, &bar);
     }
@@ -1926,16 +1988,30 @@ fn show_vomnibar(mode: &str, new_tab: bool, prefill: String) {
         .flatten()
         .and_then(|el| el.dyn_into::<HtmlInputElement>().ok());
     let list = bar.query_selector("ul").ok().flatten();
+    let clear = bar.query_selector(".vc-vomnibar-clear").ok().flatten();
     let Some(input) = input else {
         return;
     };
+    input.set_placeholder(&placeholder);
     let Some(list) = list else {
         return;
     };
     input.set_value(&prefill);
     let _ = input.focus();
-    if !prefill.is_empty() || mode != "full" {
-        refresh_vomnibar_list(input.value(), mode.to_string(), list.clone());
+    refresh_vomnibar_list(input.value(), mode.to_string(), list.clone());
+    if let Some(clear_btn) = clear {
+        let bar_clone = bar.clone();
+        let input_clone = input.clone();
+        let clear_closure =
+            Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |event: web_sys::Event| {
+                event.prevent_default();
+                event.stop_propagation();
+                input_clone.set_value("");
+                input_clone.focus().ok();
+                let _ = bar_clone.parent_node().map(|p| p.remove_child(&bar_clone));
+            }));
+        let _ = clear_btn.add_event_listener_with_callback("click", clear_closure.as_ref().unchecked_ref());
+        clear_closure.forget();
     }
     install_vomnibar_input(input, list, mode.to_string(), new_tab);
 }
@@ -1978,9 +2054,29 @@ fn install_vomnibar_input(input: HtmlInputElement, list: Element, mode: String, 
                 "enter" => {
                     event.prevent_default();
                     event.stop_propagation();
-                    let selected_url = selected_vomnibar_url(&list_for_key);
+                    let selected_kind = selected_vomnibar_attr(&list_for_key, "data-kind").unwrap_or_default();
+                    let selected_url = selected_vomnibar_attr(&list_for_key, "data-url");
+                    let selected_id = selected_vomnibar_attr(&list_for_key, "data-id");
                     let query = input_for_key.value();
+                    let cmd_mode = mode.clone();
+                    let new_tab_val = new_tab;
                     spawn_local(async move {
+                        if cmd_mode == "commands" {
+                            if let Some(url) = selected_url {
+                                execute_command_from_vomnibar(&url, &query).await;
+                                clear_overlays();
+                            }
+                            return;
+                        }
+                        if selected_kind == "tab" {
+                            if let (Some(id_str), Some(url)) = (selected_id, selected_url) {
+                                if let Ok(tab_id) = id_str.parse::<i64>() {
+                                    activate_tab(tab_id, &url).await;
+                                }
+                            }
+                            clear_overlays();
+                            return;
+                        }
                         let url = selected_url.or_else(|| {
                             resolve_navigable(&query).ok().and_then(|value| {
                                 from_js(value)
@@ -1990,7 +2086,7 @@ fn install_vomnibar_input(input: HtmlInputElement, list: Element, mode: String, 
                             })
                         });
                         if let Some(url) = url {
-                            send_open_url(url, new_tab).await;
+                            send_open_url(url, new_tab_val).await;
                             clear_overlays();
                         }
                     });
@@ -2010,10 +2106,19 @@ fn install_vomnibar_input(input: HtmlInputElement, list: Element, mode: String, 
             let Some(url) = item.get_attribute("data-url") else {
                 return;
             };
+            let kind = item.get_attribute("data-kind").unwrap_or_default();
+            let tab_id = item.get_attribute("data-id").and_then(|s| s.parse::<i64>().ok());
             let _ = list_for_click.set_attribute("data-selected", "0");
             event.prevent_default();
             event.stop_propagation();
             spawn_local(async move {
+                if kind == "tab" {
+                    if let Some(id) = tab_id {
+                        activate_tab(id, &url).await;
+                    }
+                    clear_overlays();
+                    return;
+                }
                 send_open_url(url, new_tab).await;
                 clear_overlays();
             });
@@ -2024,15 +2129,23 @@ fn install_vomnibar_input(input: HtmlInputElement, list: Element, mode: String, 
 
 fn refresh_vomnibar_list(query: String, mode: String, list: Element) {
     spawn_local(async move {
-        if let Ok(result) = query_vomnibar(&query, &mode).await {
-            let value = from_js(result);
-            let items = value
-                .get("items")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            render_vomnibar_items(&list, &items);
-        }
+        let msg = to_js(json!({
+            "type": "rs_vimium",
+            "command": "query-vomnibar",
+            "query": query,
+            "mode": mode,
+        }));
+        let Ok(msg) = msg else { return };
+        let Ok(resp) = browser_runtime::send_message_value(msg).await else {
+            return;
+        };
+        let value = from_js(resp);
+        let items = value
+            .get("items")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        render_vomnibar_items(&list, &items);
     });
 }
 
@@ -2044,11 +2157,21 @@ fn render_vomnibar_items(list: &Element, items: &[Value]) {
             let title = item.get("title").and_then(Value::as_str).unwrap_or("");
             let url = item.get("url").and_then(Value::as_str).unwrap_or("");
             let kind = item.get("kind").and_then(Value::as_str).unwrap_or("");
+            let id = item.get("id").and_then(|v| v.as_i64()).map(|i| i.to_string()).unwrap_or_default();
+            let kind_label = match kind {
+                "bookmark" => "\u{2605}",
+                "history" => "\u{21B6}",
+                "tab" => "\u{2192}",
+                "command" => ">",
+                _ => "",
+            };
             format!(
-                r#"<li class="vc-vomnibar-item{}" data-url="{}"><span class="vc-vomnibar-kind">{}</span><span class="vc-vomnibar-title">{}</span><span class="vc-vomnibar-url">{}</span></li>"#,
+                r#"<li class="vc-vomnibar-item{}" data-url="{}" data-kind="{}" data-id="{}"><span class="vc-vomnibar-title"><span class="vc-vomnibar-kind">{}</span>{}</span><span class="vc-vomnibar-url">{}</span></li>"#,
                 if index == 0 { " vc-vomnibar-selected" } else { "" },
                 html_attr(url),
-                html_text(kind),
+                html_attr(kind),
+                html_attr(&id),
+                kind_label,
                 html_text(title),
                 html_text(url)
             )
@@ -2095,17 +2218,11 @@ fn set_vomnibar_selection(list: &Element, items: &web_sys::NodeList, selected: u
     let _ = list.set_attribute("data-selected", &selected.to_string());
 }
 
-fn selected_vomnibar_url(list: &Element) -> Option<String> {
-    let items = vomnibar_items(list)?;
-    let selected = list
-        .get_attribute("data-selected")
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(0);
-    items
-        .item(selected)?
-        .dyn_into::<Element>()
-        .ok()?
-        .get_attribute("data-url")
+fn selected_vomnibar_attr(list: &Element, attr: &str) -> Option<String> {
+    list.query_selector(".vc-vomnibar-selected")
+        .ok()
+        .flatten()
+        .and_then(|el| el.get_attribute(attr))
 }
 
 fn vomnibar_item_from_target(target: Option<web_sys::EventTarget>) -> Option<Element> {
@@ -2117,6 +2234,30 @@ fn vomnibar_item_from_target(target: Option<web_sys::EventTarget>) -> Option<Ele
         element = current.parent_element();
     }
     None
+}
+
+async fn activate_tab(tab_id: i64, fallback_url: &str) {
+    let msg = match to_js(json!({
+        "type": "rs_vimium",
+        "command": "activate-tab",
+        "tabId": tab_id,
+    })) {
+        Ok(m) => m,
+        Err(_) => {
+            send_open_url(fallback_url.to_string(), false).await;
+            return;
+        }
+    };
+    if browser_runtime::send_message_value(msg).await.is_err() {
+        send_open_url(fallback_url.to_string(), false).await;
+    }
+}
+
+async fn execute_command_from_vomnibar(command_name: &str, _query: &str) {
+    let count = 1;
+    let entry = COMMAND_REGISTRY.commands_by_name.get(command_name);
+    let effect = key_handler::command_effect(command_name, count, entry);
+    apply_content_effect(effect);
 }
 
 fn html_text(text: &str) -> String {
@@ -2813,10 +2954,11 @@ fn apply_content_effect(effect: Value) {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         ),
-        "vomnibar" | "vomnibar-bookmarks" | "vomnibar-tabs" | "vomnibar-edit-url" => {
+        "vomnibar" | "vomnibar-bookmarks" | "vomnibar-tabs" | "vomnibar-commands" | "vomnibar-edit-url" => {
             let mode = match kind {
                 "vomnibar-bookmarks" => "bookmarks",
                 "vomnibar-tabs" => "tabs",
+                "vomnibar-commands" => "commands",
                 _ => "full",
             };
             let options = effect.get("options").unwrap_or(&Value::Null);

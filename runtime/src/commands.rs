@@ -470,6 +470,17 @@ pub fn all_commands() -> Vec<CommandEntry> {
             json!({}),
         ),
         ca(
+            "Vomnibar.activateCommandSelection",
+            "Run a Vimium command",
+            "vomnibar",
+            true,
+            false,
+            true,
+            false,
+            None,
+            json!({}),
+        ),
+        ca(
             "Vomnibar.activateEditUrl",
             "Edit the current URL",
             "vomnibar",
@@ -1499,6 +1510,7 @@ fn default_key_bindings() -> Vec<(Vec<String>, String, Value)> {
         m("b", "Vomnibar.activateBookmarks"),
         m("B", "Vomnibar.activateBookmarksInNewTab"),
         m("T", "Vomnibar.activateTabSelection"),
+        m(":", "Vomnibar.activateCommandSelection"),
         m("ge", "Vomnibar.activateEditUrl"),
         m("gE", "Vomnibar.activateEditUrlInNewTab"),
         m("/", "enterFindMode"),
@@ -1537,7 +1549,7 @@ mod tests {
     #[test]
     fn command_table_matches_legacy_count_and_basic_metadata() {
         let commands = all_commands();
-        assert_eq!(73, commands.len());
+        assert_eq!(74, commands.len());
         let by_name = commands
             .iter()
             .map(|command| (command.name.as_str(), command))
@@ -1554,7 +1566,7 @@ mod tests {
     #[test]
     fn default_key_mappings_include_legacy_bindings() {
         let registry = KeyMapRegistry::from_defaults();
-        assert_eq!(68, registry.key_to_command.len());
+        assert_eq!(69, registry.key_to_command.len());
         assert_eq!(
             Some("scrollDown"),
             registry.key_to_command.get("j").map(String::as_str)

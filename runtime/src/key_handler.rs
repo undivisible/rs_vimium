@@ -285,6 +285,9 @@ pub fn command_effect(cmd_name: &str, count: i64, entry: Option<&CommandEntry>) 
             json!({"kind": "vomnibar-bookmarks", "newTab": true, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
         }
         "Vomnibar.activateTabSelection" => json!({"kind": "vomnibar-tabs"}),
+        "Vomnibar.activateCommandSelection" => {
+            json!({"kind": "vomnibar-commands"})
+        }
         "Vomnibar.activateEditUrl" => {
             json!({"kind": "vomnibar-edit-url", "newTab": false, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
         }

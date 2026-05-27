@@ -37,3 +37,25 @@ div flex flex-col bg-white dark:bg-[#1a1a1a] text-black dark:text-[#e0e0e0]
               "{label}"
   div text-[10px] leading-[1.4] text-black dark:text-[#e0e0e0] px-3 py-2.5
     "Press ? on a page for the in-page help overlay."
+
+--- Vomnibar
+div vc-vomnibar
+  div vc-vomnibar-box
+    div vc-vomnibar-input-wrap
+      input vc-vomnibar-input type="text"
+      button vc-vomnibar-clear type="button" "x"
+    ul vc-vomnibar-list
+
+--- HelpOverlay
+div
+  div vc-overlay-header
+    span "rs_vimium shortcuts"
+    button vc-overlay-close type="button" "Esc"
+  div vc-overlay-grid
+    for group in {groups}
+      div vc-group
+        div vc-group-title "{name}"
+        for item in {items}
+          div vc-overlay-row
+            span vc-overlay-key "{keys}"
+            span vc-overlay-label "{label}"
