@@ -2398,7 +2398,7 @@ fn input_value_from_event_target(event: &KeyboardEvent) -> Option<String> {
 fn find_next(reverse: bool) {
     let query = find_query();
     if query.is_empty() {
-        show_find();
+        show_hud("No previous search string.");
         return;
     }
     let has_matches = CONTENT_STATE.with(|state| !state.borrow().find_matches.is_empty());
