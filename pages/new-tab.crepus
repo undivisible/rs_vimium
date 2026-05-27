@@ -24,6 +24,62 @@ main min-h-screen grid place-items-center
           input #show-bookmarks type="checkbox"
           span
             "Show bookmarks"
+        h2
+          "Search"
+        label
+          span
+            "Default search engine"
+          select #newTabSearchEngine
+            option value="duckduckgo"
+              "DuckDuckGo"
+            option value="google"
+              "Google"
+            option value="bing"
+              "Bing"
+            option value="brave"
+              "Brave"
+            option value="startpage"
+              "Startpage"
+            option value="custom"
+              "Custom URL..."
+        label #newTabSearchEngineUrlRow
+          span
+            "Custom search URL"
+          input #newTabSearchEngineUrl type="text" placeholder="https://..."
+        h2
+          "Appearance"
+        label toggle-row
+          input #newTabDarkInput type="checkbox"
+          span
+            "Dark input"
+        label
+          span
+            "Accent color"
+          input #newTabAccentColor type="color" value="#4285f4"
+        h2
+          "Background"
+        label
+          span
+            "Background type"
+          select #newTabBgType
+            option value="none"
+              "None"
+            option value="color"
+              "Color"
+            option value="image"
+              "Image"
+        label #newTabBgColorRow
+          span
+            "Background color"
+          input #newTabBgColor type="color" value="#1a1a2e"
+        label #newTabBgImageUrlRow
+          span
+            "Image URL"
+          input #newTabBgImageUrl type="text" placeholder="https://..."
+        label
+          span
+            "Upload image"
+          input #newTabBgImageUpload type="file" accept="image/*"
     details bang-help
       summary aria-label="Bang help" title="Bang help"
         "?"
@@ -170,4 +226,12 @@ input::placeholder{color:var(--ph)}
 .bang-panel dl{display:grid;grid-template-columns:auto 1fr;gap:7px 12px;max-height:320px;overflow:auto;margin:0;font-size:12px}
 .bang-panel dt{font-weight:700}
 .bang-panel dd{margin:0;color:var(--muted)}
+.settings-panel label{display:block;margin-bottom:10px;font-size:12px;color:var(--fg)}
+.settings-panel label span{display:block;margin-bottom:4px;color:var(--muted);font-weight:500}
+.settings-panel select,.settings-panel input[type="text"],.settings-panel input[type="color"]{width:100%;box-sizing:border-box;border:1px solid var(--border);background:var(--bg);color:var(--fg);font:12px/1.4 monospace;padding:6px 8px;outline:none}
+.settings-panel input[type="color"]{height:34px;padding:2px;cursor:pointer}
+.settings-panel input[type="file"]{font-size:11px;color:var(--muted)}
+.settings-panel .hidden{display:none!important}
+.settings-panel h2{margin:14px 0 8px;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)}
+.settings-panel h2:first-of-type{margin-top:0}
 </style>

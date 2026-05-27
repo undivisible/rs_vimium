@@ -53,7 +53,14 @@ pub fn default_settings() -> Value {
         "regexFindMode": false,
         "waitForEnterForFilteredHints": true,
         "helpDialog_showAdvancedCommands": false,
-        "ignoreKeyboardLayout": false
+        "ignoreKeyboardLayout": false,
+        "newTabSearchEngine": "duckduckgo",
+        "newTabSearchEngineUrl": "https://duckduckgo.com/?q=%s",
+        "newTabDarkInput": false,
+        "newTabAccentColor": "",
+        "newTabBgType": "none",
+        "newTabBgColor": "",
+        "newTabBgImageUrl": ""
     })
 }
 

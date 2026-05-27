@@ -824,10 +824,6 @@ fn is_editable_target(target: Option<web_sys::EventTarget>) -> bool {
         || matches!(tag.as_str(), "input" | "textarea" | "select")
 }
 
-fn should_handle_editable_new_tab_key(url: &str, key: &str, editable: bool) -> bool {
-    editable && key == "t" && url.ends_with("/pages/new-tab.html")
-}
-
 fn setting_value(key: &str, fallback: Value) -> Value {
     CONTENT_STATE.with(|state| {
         state
@@ -3003,13 +2999,6 @@ fn handle_content_keydown(event: KeyboardEvent, editable: bool) {
         let state = &state.borrow().key_state;
         to_js(json!({"mode": state.mode, "sequence": state.sequence, "countText": state.count_text, "input": state.input})).unwrap_or(JsValue::NULL)
     });
-    let editable =
-        if should_handle_editable_new_tab_key(&location_href().unwrap_or_default(), &key, editable)
-        {
-            false
-        } else {
-            editable
-        };
     let Ok(result_js) = content_key(state_js, &key, editable) else {
         return;
     };
@@ -3158,6 +3147,13 @@ const SETTING_KEYS: &[&str] = &[
     "regexFindMode",
     "waitForEnterForFilteredHints",
     "helpDialog_showAdvancedCommands",
+    "newTabSearchEngine",
+    "newTabSearchEngineUrl",
+    "newTabDarkInput",
+    "newTabAccentColor",
+    "newTabBgType",
+    "newTabBgColor",
+    "newTabBgImageUrl",
 ];
 
 const BOOL_KEYS: &[&str] = &[
@@ -3168,6 +3164,7 @@ const BOOL_KEYS: &[&str] = &[
     "regexFindMode",
     "waitForEnterForFilteredHints",
     "helpDialog_showAdvancedCommands",
+    "newTabDarkInput",
 ];
 
 fn set_status(message: &str, is_error: bool) {
@@ -3568,6 +3565,46 @@ const NEW_TAB_BANGS: &[NewTabBang] = &[
     },
 ];
 
+struct PresetSearchEngine {
+    key: &'static str,
+    name: &'static str,
+    url: &'static str,
+}
+
+const PRESET_SEARCH_ENGINES: &[PresetSearchEngine] = &[
+    PresetSearchEngine { key: "duckduckgo", name: "DuckDuckGo", url: "https://duckduckgo.com/?q=%s" },
+    PresetSearchEngine { key: "google", name: "Google", url: "https://www.google.com/search?q=%s" },
+    PresetSearchEngine { key: "bing", name: "Bing", url: "https://www.bing.com/search?q=%s" },
+    PresetSearchEngine { key: "brave", name: "Brave", url: "https://search.brave.com/search?q=%s" },
+    PresetSearchEngine { key: "startpage", name: "Startpage", url: "https://www.startpage.com/do/dsearch?query=%s" },
+];
+
+fn resolve_search_engine_url(settings: &serde_json::Value) -> String {
+    let engine = settings.get("newTabSearchEngine").and_then(Value::as_str).unwrap_or("duckduckgo");
+    if engine == "custom" {
+        return settings.get("newTabSearchEngineUrl").and_then(Value::as_str).unwrap_or("https://duckduckgo.com/?q=%s").to_string();
+    }
+    for preset in PRESET_SEARCH_ENGINES {
+        if preset.key == engine {
+            return preset.url.to_string();
+        }
+    }
+    "https://duckduckgo.com/?q=%s".to_string()
+}
+
+fn search_engine_display_name(settings: &serde_json::Value) -> String {
+    let engine = settings.get("newTabSearchEngine").and_then(Value::as_str).unwrap_or("duckduckgo");
+    if engine == "custom" {
+        return "Search".to_string();
+    }
+    for preset in PRESET_SEARCH_ENGINES {
+        if preset.key == engine {
+            return preset.name.to_string();
+        }
+    }
+    "DuckDuckGo".to_string()
+}
+
 fn encode_new_tab_query(query: &str) -> String {
     query
         .bytes()
@@ -3634,16 +3671,19 @@ fn new_tab_resolve_url_with_bang(query: &str, active_bang: Option<&NewTabBangSta
 fn apply_new_tab_bang_state(
     shell: &web_sys::Element,
     label: &web_sys::Element,
+    input: &web_sys::HtmlInputElement,
     active_bang: Option<&NewTabBangState>,
 ) {
     if let Some(bang) = active_bang {
         let _ = shell.class_list().add_1("is-searching");
         let _ = shell.set_attribute("style", &format!("--accent: {}", bang.color));
         label.set_inner_html(&format!("searching {}", bang.name));
+        let _ = input.set_attribute("placeholder", &format!("Search {}", bang.name));
     } else {
         let _ = shell.class_list().remove_1("is-searching");
         let _ = shell.remove_attribute("style");
         label.set_inner_html("");
+        let _ = input.set_attribute("placeholder", "Search DuckDuckGo or enter a URL");
     }
 }
 
@@ -3885,6 +3925,7 @@ fn setup_new_tab(document: &Document, window: &Window) {
                 apply_new_tab_bang_state(
                     &shell_for_input,
                     &label_for_input,
+                    &input_for_input,
                     active_for_input.borrow().as_ref(),
                 );
             }));
@@ -3894,12 +3935,13 @@ fn setup_new_tab(document: &Document, window: &Window) {
 
         let shell_for_key = shell.clone();
         let label_for_key = label.clone();
+        let input_for_key = input_el.clone();
         let active_for_key = active_bang.clone();
         let closure =
             Closure::<dyn FnMut(KeyboardEvent)>::wrap(Box::new(move |ev: KeyboardEvent| {
                 if ev.key() == "Escape" && cancel_new_tab_bang(&mut active_for_key.borrow_mut()) {
                     ev.prevent_default();
-                    apply_new_tab_bang_state(&shell_for_key, &label_for_key, None);
+                    apply_new_tab_bang_state(&shell_for_key, &label_for_key, &input_for_key, None);
                 }
             }));
         let _ =
@@ -4032,22 +4074,4 @@ mod tests {
         assert!(!cancel_new_tab_bang(&mut active));
     }
 
-    #[test]
-    fn new_tab_search_allows_create_tab_key() {
-        assert!(should_handle_editable_new_tab_key(
-            "chrome-extension://abc/pages/new-tab.html",
-            "t",
-            true
-        ));
-        assert!(!should_handle_editable_new_tab_key(
-            "https://example.com",
-            "t",
-            true
-        ));
-        assert!(!should_handle_editable_new_tab_key(
-            "chrome-extension://abc/pages/new-tab.html",
-            "x",
-            true
-        ));
-    }
 }
