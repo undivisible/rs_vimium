@@ -20,7 +20,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Install crepus
-        run: cargo install crepus
+        run: cargo install crepuscularity-cli
 
       - name: Build extension
         run: crepus webext build --app .
