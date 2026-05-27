@@ -127,7 +127,10 @@ async fn query_bookmarks(query: &str) -> Result<Vec<CompletionItem>, String> {
             if !terms.is_empty() {
                 let title_lower = node.title.to_lowercase();
                 let url_lower = url.to_lowercase();
-                if !terms.iter().any(|t| title_lower.contains(t) || url_lower.contains(t)) {
+                if !terms
+                    .iter()
+                    .any(|t| title_lower.contains(t) || url_lower.contains(t))
+                {
                     return None;
                 }
             }
@@ -184,7 +187,10 @@ async fn query_tabs(query: &str) -> Result<Vec<CompletionItem>, String> {
             if !terms.is_empty() {
                 let title_lower = tab.title.as_deref().unwrap_or("").to_lowercase();
                 let url_lower = url.to_lowercase();
-                if !terms.iter().any(|t| title_lower.contains(t) || url_lower.contains(t)) {
+                if !terms
+                    .iter()
+                    .any(|t| title_lower.contains(t) || url_lower.contains(t))
+                {
                     return None;
                 }
             }
@@ -213,7 +219,10 @@ fn query_commands(query: &str) -> Vec<CompletionItem> {
             if !terms.is_empty() {
                 let name_lower = cmd.name.to_lowercase();
                 let desc_lower = cmd.desc.to_lowercase();
-                if !terms.iter().any(|t| name_lower.contains(t) || desc_lower.contains(t)) {
+                if !terms
+                    .iter()
+                    .any(|t| name_lower.contains(t) || desc_lower.contains(t))
+                {
                     return None;
                 }
             }
@@ -241,20 +250,23 @@ pub fn scored_items(items: Vec<CompletionItem>, query: &str) -> Vec<CompletionIt
     for mut item in items {
         let title_lower = item.title.to_lowercase();
         let url_lower = item.url.to_lowercase();
-        let mut score = terms.iter().map(|term| {
-            let mut s = 0.0;
-            if title_lower.starts_with(term) {
-                s += 2.0;
-            } else if title_lower.contains(term) {
-                s += 1.0;
-            }
-            if url_lower.starts_with(term) {
-                s += 1.5;
-            } else if url_lower.contains(term) {
-                s += 0.5;
-            }
-            s
-        }).sum::<f64>();
+        let mut score = terms
+            .iter()
+            .map(|term| {
+                let mut s = 0.0;
+                if title_lower.starts_with(term) {
+                    s += 2.0;
+                } else if title_lower.contains(term) {
+                    s += 1.0;
+                }
+                if url_lower.starts_with(term) {
+                    s += 1.5;
+                } else if url_lower.contains(term) {
+                    s += 0.5;
+                }
+                s
+            })
+            .sum::<f64>();
 
         if title_lower == query_lower {
             score += 3.0;
@@ -342,7 +354,10 @@ mod tests {
     fn urlencode_encodes_spaces_and_special_chars() {
         assert_eq!(urlencode("hello world"), "hello%20world");
         assert_eq!(urlencode("a/b=c"), "a%2Fb%3Dc");
-        assert_eq!(urlencode("русский"), "%D1%80%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9");
+        assert_eq!(
+            urlencode("русский"),
+            "%D1%80%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9"
+        );
     }
 
     #[test]
@@ -353,7 +368,10 @@ mod tests {
         };
         assert_eq!(
             engines.resolve("hello world"),
-            ("https://google.com/search?q=hello%20world".to_string(), "hello world".to_string())
+            (
+                "https://google.com/search?q=hello%20world".to_string(),
+                "hello world".to_string()
+            )
         );
     }
 
@@ -361,13 +379,18 @@ mod tests {
     fn search_engine_resolve_uses_custom_keyword() {
         let engines = SearchEngines {
             google: "https://google.com/search?q=%s".to_string(),
-            custom: vec![
-                ("w".to_string(), "https://en.wikipedia.org/wiki/%s".to_string(), "Wikipedia".to_string()),
-            ],
+            custom: vec![(
+                "w".to_string(),
+                "https://en.wikipedia.org/wiki/%s".to_string(),
+                "Wikipedia".to_string(),
+            )],
         };
         assert_eq!(
             engines.resolve("w:rust"),
-            ("https://en.wikipedia.org/wiki/rust".to_string(), "w:rust".to_string())
+            (
+                "https://en.wikipedia.org/wiki/rust".to_string(),
+                "w:rust".to_string()
+            )
         );
     }
 
@@ -375,7 +398,11 @@ mod tests {
     fn search_engine_resolve_falls_back_when_keyword_not_found() {
         let engines = SearchEngines {
             google: "https://google.com/search?q=%s".to_string(),
-            custom: vec![("w".to_string(), "https://wiki/%s".to_string(), "Wiki".to_string())],
+            custom: vec![(
+                "w".to_string(),
+                "https://wiki/%s".to_string(),
+                "Wiki".to_string(),
+            )],
         };
         let (url, _) = engines.resolve("x:test");
         assert!(url.contains("google.com"));
@@ -393,9 +420,27 @@ mod tests {
     #[test]
     fn scored_items_ranks_by_title_and_url_match() {
         let items = vec![
-            CompletionItem { title: "Rust Book".into(), url: "https://doc.rust-lang.org/book".into(), kind: "history".into(), relevance: 0.0, id: None },
-            CompletionItem { title: "Rust By Example".into(), url: "https://doc.rust-lang.org/rust-by-example".into(), kind: "history".into(), relevance: 0.0, id: None },
-            CompletionItem { title: "Python Docs".into(), url: "https://docs.python.org".into(), kind: "history".into(), relevance: 0.0, id: None },
+            CompletionItem {
+                title: "Rust Book".into(),
+                url: "https://doc.rust-lang.org/book".into(),
+                kind: "history".into(),
+                relevance: 0.0,
+                id: None,
+            },
+            CompletionItem {
+                title: "Rust By Example".into(),
+                url: "https://doc.rust-lang.org/rust-by-example".into(),
+                kind: "history".into(),
+                relevance: 0.0,
+                id: None,
+            },
+            CompletionItem {
+                title: "Python Docs".into(),
+                url: "https://docs.python.org".into(),
+                kind: "history".into(),
+                relevance: 0.0,
+                id: None,
+            },
         ];
         let scored = scored_items(items, "rust");
         assert!(!scored.is_empty());
@@ -410,8 +455,20 @@ mod tests {
     #[test]
     fn scored_items_deduplicates_by_url_keeping_higher_scored() {
         let items = vec![
-            CompletionItem { title: "Site".into(), url: "https://docs.rs".into(), kind: "history".into(), relevance: 0.0, id: None },
-            CompletionItem { title: "Rust Docs".into(), url: "https://docs.rs".into(), kind: "bookmark".into(), relevance: 0.0, id: None },
+            CompletionItem {
+                title: "Site".into(),
+                url: "https://docs.rs".into(),
+                kind: "history".into(),
+                relevance: 0.0,
+                id: None,
+            },
+            CompletionItem {
+                title: "Rust Docs".into(),
+                url: "https://docs.rs".into(),
+                kind: "bookmark".into(),
+                relevance: 0.0,
+                id: None,
+            },
         ];
         let scored = scored_items(items, "rust");
         assert_eq!(scored.len(), 1);
@@ -421,8 +478,20 @@ mod tests {
     #[test]
     fn scored_items_keeps_tab_on_dedup_tie() {
         let items = vec![
-            CompletionItem { title: "Tab Page".into(), url: "https://example.com".into(), kind: "tab".into(), relevance: 0.0, id: Some(5) },
-            CompletionItem { title: "History Page".into(), url: "https://example.com".into(), kind: "history".into(), relevance: 0.0, id: None },
+            CompletionItem {
+                title: "Tab Page".into(),
+                url: "https://example.com".into(),
+                kind: "tab".into(),
+                relevance: 0.0,
+                id: Some(5),
+            },
+            CompletionItem {
+                title: "History Page".into(),
+                url: "https://example.com".into(),
+                kind: "history".into(),
+                relevance: 0.0,
+                id: None,
+            },
         ];
         let scored = scored_items(items, "page");
         assert_eq!(scored.len(), 1);
@@ -479,7 +548,11 @@ mod tests {
     fn resolve_navigable_uses_custom_engine_keyword() {
         let engines = SearchEngines {
             google: "https://google.com/search?q=%s".into(),
-            custom: vec![("gh".into(), "https://github.com/search?q=%s".into(), "GitHub".into())],
+            custom: vec![(
+                "gh".into(),
+                "https://github.com/search?q=%s".into(),
+                "GitHub".into(),
+            )],
         };
         let r = resolve_navigable("gh:rust", &engines);
         assert_eq!(r["kind"], "url");
@@ -494,7 +567,10 @@ mod tests {
         };
         let r = resolve_navigable("cargo", &engines);
         assert_eq!(r["kind"], "url");
-        assert!(r["url"].as_str().unwrap().starts_with("https://google.com/search?q="));
+        assert!(r["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://google.com/search?q="));
     }
 
     #[test]
@@ -506,4 +582,3 @@ mod tests {
         assert!(engines.custom.iter().any(|(k, _, _)| k == "gh"));
     }
 }
-

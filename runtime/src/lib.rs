@@ -2010,7 +2010,8 @@ fn show_vomnibar(mode: &str, new_tab: bool, prefill: String) {
                 input_clone.focus().ok();
                 let _ = bar_clone.parent_node().map(|p| p.remove_child(&bar_clone));
             }));
-        let _ = clear_btn.add_event_listener_with_callback("click", clear_closure.as_ref().unchecked_ref());
+        let _ = clear_btn
+            .add_event_listener_with_callback("click", clear_closure.as_ref().unchecked_ref());
         clear_closure.forget();
     }
     install_vomnibar_input(input, list, mode.to_string(), new_tab);
@@ -2054,7 +2055,8 @@ fn install_vomnibar_input(input: HtmlInputElement, list: Element, mode: String, 
                 "enter" => {
                     event.prevent_default();
                     event.stop_propagation();
-                    let selected_kind = selected_vomnibar_attr(&list_for_key, "data-kind").unwrap_or_default();
+                    let selected_kind =
+                        selected_vomnibar_attr(&list_for_key, "data-kind").unwrap_or_default();
                     let selected_url = selected_vomnibar_attr(&list_for_key, "data-url");
                     let selected_id = selected_vomnibar_attr(&list_for_key, "data-id");
                     let query = input_for_key.value();
@@ -2107,7 +2109,9 @@ fn install_vomnibar_input(input: HtmlInputElement, list: Element, mode: String, 
                 return;
             };
             let kind = item.get_attribute("data-kind").unwrap_or_default();
-            let tab_id = item.get_attribute("data-id").and_then(|s| s.parse::<i64>().ok());
+            let tab_id = item
+                .get_attribute("data-id")
+                .and_then(|s| s.parse::<i64>().ok());
             let _ = list_for_click.set_attribute("data-selected", "0");
             event.prevent_default();
             event.stop_propagation();
@@ -2954,7 +2958,8 @@ fn apply_content_effect(effect: Value) {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         ),
-        "vomnibar" | "vomnibar-bookmarks" | "vomnibar-tabs" | "vomnibar-commands" | "vomnibar-edit-url" => {
+        "vomnibar" | "vomnibar-bookmarks" | "vomnibar-tabs" | "vomnibar-commands"
+        | "vomnibar-edit-url" => {
             let mode = match kind {
                 "vomnibar-bookmarks" => "bookmarks",
                 "vomnibar-tabs" => "tabs",

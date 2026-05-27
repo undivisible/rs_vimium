@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "crepuscularity-webext"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "crepuscularity-core",
  "crepuscularity-web",
@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "rs_vimium_runtime"
-version = "1.1.0"
+version = "1.2.2"
 dependencies = [
  "crepuscularity-core",
  "crepuscularity-web",

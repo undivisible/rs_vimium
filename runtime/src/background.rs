@@ -470,7 +470,10 @@ mod tests {
     fn command_arg_reads_direct_and_nested() {
         let args = json!({"count": 5, "args": {"hard": true}});
         assert_eq!(command_arg(&args, "count").and_then(Value::as_i64), Some(5));
-        assert_eq!(command_arg(&args, "hard").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            command_arg(&args, "hard").and_then(Value::as_bool),
+            Some(true)
+        );
         assert_eq!(command_arg(&args, "missing"), None);
     }
 
@@ -492,7 +495,10 @@ mod tests {
     #[test]
     fn first_url_option_finds_urls_in_options() {
         let opts = json!({"https://example.com": true, "window": true});
-        assert_eq!(first_url_option(&opts), Some("https://example.com".to_string()));
+        assert_eq!(
+            first_url_option(&opts),
+            Some("https://example.com".to_string())
+        );
     }
 
     #[test]
@@ -509,8 +515,14 @@ mod tests {
 
     #[test]
     fn resolve_new_tab_url_keeps_absolute_urls() {
-        assert_eq!(resolve_new_tab_url("https://example.com"), "https://example.com");
-        assert_eq!(resolve_new_tab_url("http://example.com/path"), "http://example.com/path");
+        assert_eq!(
+            resolve_new_tab_url("https://example.com"),
+            "https://example.com"
+        );
+        assert_eq!(
+            resolve_new_tab_url("http://example.com/path"),
+            "http://example.com/path"
+        );
         assert_eq!(resolve_new_tab_url("about:blank"), "about:blank");
     }
 }
