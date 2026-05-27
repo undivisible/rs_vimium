@@ -1,6 +1,8 @@
 # rs_vimium
 
-Vim-style keyboard navigation for the web, written in Rust with [Crepuscularity](https://github.com/semitechnological/crepuscularity).
+> The hacker's browser, in Rust.
+
+Keyboard-first browser runtime and web superpowers built in Rust/WASM with [Crepuscularity](https://github.com/semitechnological/crepuscularity).
 
 ## Build
 
