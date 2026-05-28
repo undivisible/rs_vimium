@@ -266,11 +266,14 @@ pub fn content_key(state_val: JsValue, key: &str, editable: bool) -> Result<JsVa
             .unwrap_or("")
             .to_string(),
     };
+    to_js(content_key_result(&state, key, editable))
+}
 
+fn content_key_result(state: &key_handler::KeyState, key: &str, editable: bool) -> Value {
     let mappings = USER_MAPPINGS.lock().unwrap();
     let exclusion_state = current_exclusion_state();
     if !exclusion_state.is_enabled_for_url {
-        return to_js(json!({
+        return json!({
             "state": {
                 "mode": state.mode,
                 "sequence": state.sequence,
@@ -279,17 +282,16 @@ pub fn content_key(state_val: JsValue, key: &str, editable: bool) -> Result<JsVa
             },
             "effect": null,
             "prevent": false
-        }));
+        });
     }
-    let result = key_handler::handle_key(
-        &state,
+    key_handler::handle_key(
+        state,
         key,
         editable,
         &COMMAND_REGISTRY,
         &mappings,
         &exclusion_state.pass_keys,
-    );
-    to_js(result)
+    )
 }
 
 #[wasm_bindgen]
@@ -3138,14 +3140,8 @@ fn handle_content_keydown(event: KeyboardEvent, editable: bool) {
         handle_mark_key(&key, &event);
         return;
     }
-    let state_js = CONTENT_STATE.with(|state| {
-        let state = &state.borrow().key_state;
-        to_js(json!({"mode": state.mode, "sequence": state.sequence, "countText": state.count_text, "input": state.input})).unwrap_or(JsValue::NULL)
-    });
-    let Ok(result_js) = content_key(state_js, &key, editable) else {
-        return;
-    };
-    let result = from_js(result_js);
+    let key_state = CONTENT_STATE.with(|state| state.borrow().key_state.clone());
+    let result = content_key_result(&key_state, &key, editable);
     if let Some(next) = result.get("state") {
         CONTENT_STATE.with(|state| {
             let mut state = state.borrow_mut();

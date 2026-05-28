@@ -1,0 +1,7 @@
+*.js linguist-generated=true
+*.mjs linguist-generated=true
+*.crepus linguist-generated=true
+*.css linguist-generated=true
+*.html linguist-generated=true
+*.svg linguist-generated=true
+dist/** linguist-generated=true

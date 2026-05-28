@@ -13,7 +13,6 @@ bun run build
 Load `dist/unpacked/` as an unpacked extension in `chrome://extensions`.
 Set `CREPUS_BIN=/path/to/crepus` for the benchmark script if you want a different CLI binary.
 For Firefox output, run `crepus webext build --app . --browser firefox` and load `dist/firefox/manifest.json` in `about:debugging#/runtime/this-firefox`.
-When `wasm-opt` is installed, Crepuscularity webext also optimizes `runtime_bg.wasm` on release builds.
 
 The web-extension build uses the workspace release profile:
 
@@ -30,13 +29,13 @@ The web-extension build uses the workspace release profile:
 bun run benchmark
 ```
 
-The benchmark builds `dist/unpacked`, launches fresh Chrome for Testing profiles, and compares user-facing browser-action TTAs between rs_vimium and upstream Vimium on a deterministic local page. Set `CHROME_BIN` to choose a browser binary. Set `VIMIUM_PATH` to compare against an upstream Vimium checkout, or pass `--skip-vimium`.
+The benchmark builds `dist/unpacked`, launches fresh Chrome for Testing profiles, and compares user-facing browser-action TTAs between rs_vimium and Vimium on a deterministic local page. Set `CHROME_BIN` to choose a browser binary. Set `VIMIUM_PATH` to compare against a Vimium checkout, or pass `--skip-vimium`.
 
 Latest local run:
 
 | Field | Value |
 | --- | --- |
-| Date | 2026-05-28T00:09:43.261Z |
+| Date | 2026-05-28T00:28:38.169Z |
 | Browser | Chrome for Testing 148.0.7778.96 |
 | Machine | Mac17,9, Apple M5 Pro, arm64 |
 | CPU cores | 15 physical, 15 logical |
@@ -51,11 +50,11 @@ Browser-action TTA measures from key dispatch to observable scroll or DOM state.
 
 | Action | rs_vimium median | rs_vimium p90 | Vimium median | Vimium p90 |
 | --- | ---: | ---: | ---: | ---: |
-| `j` scroll | 2.5 ms | 4.0 ms | 35.8 ms | 55.0 ms |
-| `f` link hints | 7.8 ms | 14.0 ms | 26.5 ms | 44.5 ms |
-| `o` vomnibar | 2.3 ms | 6.7 ms | 2.8 ms | 4.7 ms |
-| `?` help | 4.8 ms | 5.8 ms | 3.4 ms | 6.1 ms |
-| `/` find | 3.4 ms | 4.7 ms | 2.8 ms | 5.6 ms |
+| `j` scroll | 2.6 ms | 7.0 ms | 38.0 ms | 40.3 ms |
+| `f` link hints | 6.9 ms | 11.0 ms | 30.2 ms | 40.6 ms |
+| `o` vomnibar | 2.5 ms | 3.7 ms | 1.9 ms | 2.6 ms |
+| `?` help | 2.2 ms | 3.5 ms | 1.8 ms | 2.2 ms |
+| `/` find | 1.7 ms | 3.2 ms | 1.5 ms | 1.7 ms |
 
 ## Layout
 
@@ -72,10 +71,6 @@ Browser-action TTA measures from key dispatch to observable scroll or DOM state.
 ## New tab page
 
 With default settings, rs_vimium overrides the browser new-tab page (`chrome_url_overrides.newtab` → `pages/new-tab.html`). Change this under **Options → New tab page**.
-
-## Upstream
-
-`upstream` tracks [philc/vimium](https://github.com/philc/vimium) for behavior comparison. This repo is the maintained Rust rewrite.
 
 ## License
 
