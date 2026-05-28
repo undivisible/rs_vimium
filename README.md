@@ -35,26 +35,26 @@ Latest local run:
 
 | Field | Value |
 | --- | --- |
-| Date | 2026-05-28T00:28:38.169Z |
-| Browser | Chrome for Testing 148.0.7778.96 |
+| Date | 2026-05-28T01:03:34.634Z |
+| Browser | Google Chrome for Testing 148.0.7778.96 |
 | Machine | Mac17,9, Apple M5 Pro, arm64 |
 | CPU cores | 15 physical, 15 logical |
 | Memory | 48 GiB |
 | OS | macOS 26.5 (25F71) |
 | Samples | 8 measured, 2 warmup |
 | Page size | 160 links, 160 buttons |
-| rs_vimium | 1.2.2 |
+| rs_vimium | 1.2.3 |
 | Vimium | 2.4.2 |
 
 Browser-action TTA measures from key dispatch to observable scroll or DOM state.
 
 | Action | rs_vimium median | rs_vimium p90 | Vimium median | Vimium p90 |
 | --- | ---: | ---: | ---: | ---: |
-| `j` scroll | 2.6 ms | 7.0 ms | 38.0 ms | 40.3 ms |
-| `f` link hints | 6.9 ms | 11.0 ms | 30.2 ms | 40.6 ms |
-| `o` vomnibar | 2.5 ms | 3.7 ms | 1.9 ms | 2.6 ms |
-| `?` help | 2.2 ms | 3.5 ms | 1.8 ms | 2.2 ms |
-| `/` find | 1.7 ms | 3.2 ms | 1.5 ms | 1.7 ms |
+| `j` scroll | 1.8 ms | 7.1 ms | 37.4 ms | 41.8 ms |
+| `f` link hints | 4.0 ms | 4.4 ms | 35.8 ms | 44.9 ms |
+| `o` vomnibar | 1.7 ms | 1.8 ms | 5.1 ms | 6.5 ms |
+| `?` help | 2.1 ms | 2.5 ms | 5.3 ms | 6.5 ms |
+| `/` find | 2.2 ms | 3.5 ms | 4.3 ms | 4.6 ms |
 
 ## Layout
 

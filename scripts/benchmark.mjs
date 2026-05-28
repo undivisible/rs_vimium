@@ -79,6 +79,10 @@ function machineInfo() {
   };
 }
 
+function chromeVersion() {
+  return commandOutput(chromeBin, ["--version"]) || chromeBin;
+}
+
 async function waitForHttp(url, attempts = 100) {
   for (let i = 0; i < attempts; i += 1) {
     try {
@@ -471,6 +475,60 @@ const vimiumSelectors = {
   find: "iframe.vimium-hud-frame"
 };
 
+const actionLabels = new Map([
+  ["scroll_j", "`j` scroll"],
+  ["link_hints_f", "`f` link hints"],
+  ["vomnibar_o", "`o` vomnibar"],
+  ["help_question", "`?` help"],
+  ["find_slash", "`/` find"]
+]);
+
+function metric(actions, name, field) {
+  return actions.find((action) => action.name === name)?.[field] ?? null;
+}
+
+function ms(value) {
+  return value == null ? "n/a" : `${Number(value).toFixed(1)} ms`;
+}
+
+function updateReadme(result) {
+  const readmePath = join(root, "README.md");
+  const metadata = result.metadata;
+  const machine = metadata.machine;
+  const rows = [...actionLabels.entries()].map(([name, label]) => {
+    const rsActions = result.rs_vimium.browser_actions;
+    const vimiumActions = result.vimium?.browser_actions ?? [];
+    return `| ${label} | ${ms(metric(rsActions, name, "median_ms"))} | ${ms(metric(rsActions, name, "p90_ms"))} | ${ms(metric(vimiumActions, name, "median_ms"))} | ${ms(metric(vimiumActions, name, "p90_ms"))} |`;
+  });
+  const block = `Latest local run:
+
+| Field | Value |
+| --- | --- |
+| Date | ${metadata.started_at} |
+| Browser | ${metadata.chrome_version} |
+| Machine | ${machine.model}, ${machine.cpu}, ${machine.arch} |
+| CPU cores | ${machine.physical_cpus} physical, ${machine.logical_cpus} logical |
+| Memory | ${machine.memory_gib} GiB |
+| OS | ${machine.os} |
+| Samples | ${metadata.samples} measured, ${metadata.warmup} warmup |
+| Page size | ${metadata.link_count} links, ${metadata.link_count} buttons |
+| rs_vimium | ${metadata.rs_vimium} |
+| Vimium | ${metadata.vimium ?? "not run"} |
+
+Browser-action TTA measures from key dispatch to observable scroll or DOM state.
+
+| Action | rs_vimium median | rs_vimium p90 | Vimium median | Vimium p90 |
+| --- | ---: | ---: | ---: | ---: |
+${rows.join("\n")}
+`;
+  const current = readFileSync(readmePath, "utf8");
+  const next = current.replace(/Latest local run:\n\n[\s\S]*?\n## Layout/, `${block}\n## Layout`);
+  if (next === current) {
+    throw new Error("README benchmark block was not found.");
+  }
+  writeFileSync(readmePath, next);
+}
+
 const startedAt = new Date().toISOString();
 const vimium = prepareVimium();
 const result = await withServer(async (url) => {
@@ -489,6 +547,7 @@ const result = await withServer(async (url) => {
       warmup,
       link_count: linkCount,
       machine: machineInfo(),
+      chrome_version: chromeVersion(),
       build_command: `${crepusBin} webext build --app .`,
       release_profile: releaseProfile,
       rs_vimium: JSON.parse(readFileSync(join(rsExtension, "manifest.json"), "utf8")).version,
@@ -503,4 +562,5 @@ const result = await withServer(async (url) => {
   };
 });
 
+updateReadme(result);
 console.log(JSON.stringify(result, null, 2));

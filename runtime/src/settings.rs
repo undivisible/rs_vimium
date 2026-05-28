@@ -214,6 +214,15 @@ pub struct ExclusionState {
     pub pass_keys: String,
 }
 
+impl Default for ExclusionState {
+    fn default() -> Self {
+        Self {
+            is_enabled_for_url: true,
+            pass_keys: String::new(),
+        }
+    }
+}
+
 pub fn enabled_state_for_url(url: &str, rules: &[ExclusionRule]) -> ExclusionState {
     let matching_rules = rules
         .iter()

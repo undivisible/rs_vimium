@@ -824,6 +824,8 @@ struct ContentDomState {
     find_matches: Vec<FindMatch>,
     find_active_index: usize,
     settings: Value,
+    exclusion_url: String,
+    exclusion_state: settings::ExclusionState,
     mapped_keys: std::collections::HashMap<String, String>,
     activated_element: Option<Element>,
     pass_next_key: bool,
@@ -894,16 +896,12 @@ fn setting_f64(key: &str, fallback: f64) -> f64 {
         .unwrap_or(fallback)
 }
 
-fn current_exclusion_state() -> settings::ExclusionState {
-    let rules = CONTENT_STATE.with(|state| {
-        state
-            .borrow()
-            .settings
-            .get("exclusionRules")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default()
-    });
+fn exclusion_state_from_settings(settings: &Value, url: &str) -> settings::ExclusionState {
+    let rules = settings
+        .get("exclusionRules")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let rules = rules
         .into_iter()
         .filter_map(|rule| {
@@ -917,12 +915,34 @@ fn current_exclusion_state() -> settings::ExclusionState {
             })
         })
         .collect::<Vec<_>>();
-    location_href()
-        .map(|url| settings::enabled_state_for_url(&url, &rules))
-        .unwrap_or(settings::ExclusionState {
-            is_enabled_for_url: true,
-            pass_keys: String::new(),
-        })
+    settings::enabled_state_for_url(url, &rules)
+}
+
+fn refresh_exclusion_state(state: &mut ContentDomState) {
+    let Some(url) = location_href() else {
+        state.exclusion_url.clear();
+        state.exclusion_state = settings::ExclusionState::default();
+        return;
+    };
+    state.exclusion_state = exclusion_state_from_settings(&state.settings, &url);
+    state.exclusion_url = url;
+}
+
+fn current_exclusion_state() -> settings::ExclusionState {
+    let current_url = location_href().unwrap_or_default();
+    CONTENT_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if state.exclusion_url != current_url {
+            if current_url.is_empty() {
+                state.exclusion_state = settings::ExclusionState::default();
+            } else {
+                state.exclusion_state =
+                    exclusion_state_from_settings(&state.settings, &current_url);
+            }
+            state.exclusion_url = current_url;
+        }
+        state.exclusion_state.clone()
+    })
 }
 
 fn clear_selector(selector: &str) {
@@ -1275,16 +1295,59 @@ fn element_style_state(window: &Window, element: &Element) -> Option<ElementStyl
     })
 }
 
-fn element_style_allows_hint(element: &Element) -> bool {
-    let Some(window) = win() else {
-        return false;
-    };
+struct HintScanContext {
+    window: Window,
+    viewport_width: f64,
+    viewport_height: f64,
+    elements_from_point: Option<js_sys::Function>,
+    element_from_point: Option<js_sys::Function>,
+    style_cache: Vec<(Element, ElementStyleState)>,
+}
+
+impl HintScanContext {
+    fn new(document: &Document) -> Option<Self> {
+        let window = win()?;
+        Some(Self {
+            viewport_width: window.inner_width().ok()?.as_f64()?,
+            viewport_height: window.inner_height().ok()?.as_f64()?,
+            elements_from_point: js_sys::Reflect::get(
+                document.as_ref(),
+                &JsValue::from_str("elementsFromPoint"),
+            )
+            .ok()
+            .and_then(|value| value.dyn_into::<js_sys::Function>().ok()),
+            element_from_point: js_sys::Reflect::get(
+                document.as_ref(),
+                &JsValue::from_str("elementFromPoint"),
+            )
+            .ok()
+            .and_then(|value| value.dyn_into::<js_sys::Function>().ok()),
+            style_cache: Vec::new(),
+            window,
+        })
+    }
+
+    fn element_style_state(&mut self, element: &Element) -> Option<ElementStyleState> {
+        if let Some((_, style)) = self
+            .style_cache
+            .iter()
+            .find(|(cached, _)| js_sys::Object::is(cached.as_ref(), element.as_ref()))
+        {
+            return Some(style.clone());
+        }
+        let style = element_style_state(&self.window, element)?;
+        self.style_cache.push((element.clone(), style.clone()));
+        Some(style)
+    }
+}
+
+fn element_style_allows_hint(ctx: &mut HintScanContext, element: &Element) -> bool {
     if element_is_hidden_by_closed_details(element) {
         return false;
     }
     let mut current = Some(element.clone());
     while let Some(element) = current {
-        let Some(style) = element_style_state(&window, &element) else {
+        let Some(style) = ctx.element_style_state(&element) else {
             return false;
         };
         if !style.allows_hint_target() {
@@ -1323,25 +1386,10 @@ fn rect_bounds(rect: &web_sys::DomRect) -> RectBounds {
     }
 }
 
-fn viewport_bounds() -> Option<(f64, f64)> {
-    let window = win()?;
-    Some((
-        window.inner_width().ok()?.as_f64()?,
-        window.inner_height().ok()?.as_f64()?,
-    ))
-}
-
 fn element_contains(container: &Element, child: &Element) -> bool {
-    let Ok(method) = js_sys::Reflect::get(container.as_ref(), &JsValue::from_str("contains"))
-        .and_then(|value| value.dyn_into::<js_sys::Function>())
-    else {
-        return false;
-    };
-    method
-        .call1(container.as_ref(), child.as_ref())
-        .ok()
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
+    let container = container.unchecked_ref::<Node>();
+    let child = child.unchecked_ref::<Node>();
+    container.contains(Some(child))
 }
 
 fn hit_matches_target(target: &Element, hit: &Element) -> bool {
@@ -1350,11 +1398,13 @@ fn hit_matches_target(target: &Element, hit: &Element) -> bool {
         || element_contains(hit, target)
 }
 
-fn element_from_point(document: &Document, x: f64, y: f64) -> Option<Element> {
-    let method = js_sys::Reflect::get(document.as_ref(), &JsValue::from_str("elementFromPoint"))
-        .ok()?
-        .dyn_into::<js_sys::Function>()
-        .ok()?;
+fn element_from_point(
+    ctx: &HintScanContext,
+    document: &Document,
+    x: f64,
+    y: f64,
+) -> Option<Element> {
+    let method = ctx.element_from_point.as_ref()?;
     method
         .call2(
             document.as_ref(),
@@ -1366,11 +1416,14 @@ fn element_from_point(document: &Document, x: f64, y: f64) -> Option<Element> {
         .ok()
 }
 
-fn elements_from_point_contains(document: &Document, target: &Element, x: f64, y: f64) -> bool {
-    if let Ok(method) =
-        js_sys::Reflect::get(document.as_ref(), &JsValue::from_str("elementsFromPoint"))
-            .and_then(|value| value.dyn_into::<js_sys::Function>())
-    {
+fn elements_from_point_contains(
+    ctx: &HintScanContext,
+    document: &Document,
+    target: &Element,
+    x: f64,
+    y: f64,
+) -> bool {
+    if let Some(method) = ctx.elements_from_point.as_ref() {
         if let Ok(values) = method.call2(
             document.as_ref(),
             &JsValue::from_f64(x),
@@ -1387,12 +1440,17 @@ fn elements_from_point_contains(document: &Document, target: &Element, x: f64, y
             return false;
         }
     }
-    element_from_point(document, x, y)
+    element_from_point(ctx, document, x, y)
         .as_ref()
         .is_some_and(|hit| hit_matches_target(target, hit))
 }
 
-fn hint_rect_is_reachable(document: &Document, target: &Element, rect: RectBounds) -> bool {
+fn hint_rect_is_reachable(
+    ctx: &HintScanContext,
+    document: &Document,
+    target: &Element,
+    rect: RectBounds,
+) -> bool {
     let left = rect.left + 1.0;
     let top = rect.top + 1.0;
     let right = (rect.right - 1.0).max(left);
@@ -1407,25 +1465,28 @@ fn hint_rect_is_reachable(document: &Document, target: &Element, rect: RectBound
         (right, bottom),
     ]
     .into_iter()
-    .any(|(x, y)| elements_from_point_contains(document, target, x, y))
+    .any(|(x, y)| elements_from_point_contains(ctx, document, target, x, y))
 }
 
-fn hint_rect_for_element(document: &Document, element: &Element) -> Option<RectBounds> {
-    if !element_style_allows_hint(element) {
+fn hint_rect_for_element(
+    ctx: &mut HintScanContext,
+    document: &Document,
+    element: &Element,
+) -> Option<RectBounds> {
+    if !element_style_allows_hint(ctx, element) {
         return None;
     }
-    let (viewport_width, viewport_height) = viewport_bounds()?;
     let rects = element.get_client_rects();
     for i in 0..rects.length() {
         let Some(rect) = rects.item(i) else {
             continue;
         };
         let Some(cropped) =
-            crop_rect_to_viewport(rect_bounds(&rect), viewport_width, viewport_height)
+            crop_rect_to_viewport(rect_bounds(&rect), ctx.viewport_width, ctx.viewport_height)
         else {
             continue;
         };
-        if hint_rect_is_reachable(document, element, cropped) {
+        if hint_rect_is_reachable(ctx, document, element, cropped) {
             return Some(cropped);
         }
     }
@@ -1437,7 +1498,7 @@ fn hint_rect_for_element(document: &Document, element: &Element) -> Option<RectB
         let Ok(child) = child.dyn_into::<Element>() else {
             continue;
         };
-        if let Some(rect) = hint_rect_for_element(document, &child) {
+        if let Some(rect) = hint_rect_for_element(ctx, document, &child) {
             return Some(rect);
         }
     }
@@ -1831,6 +1892,9 @@ fn activate_hints(action: &str) {
     let Ok(nodes) = document.query_selector_all(selector) else {
         return;
     };
+    let Some(mut hint_scan) = HintScanContext::new(&document) else {
+        return;
+    };
     let scroll_x = win().and_then(|w| w.scroll_x().ok()).unwrap_or(0.0);
     let scroll_y = win().and_then(|w| w.scroll_y().ok()).unwrap_or(0.0);
     let mut targets = Vec::new();
@@ -1848,7 +1912,7 @@ fn activate_hints(action: &str) {
         let Ok(target) = node.dyn_into::<Element>() else {
             continue;
         };
-        let Some(rect) = hint_rect_for_element(&document, &target) else {
+        let Some(rect) = hint_rect_for_element(&mut hint_scan, &document, &target) else {
             continue;
         };
         targets.push((target, rect.left, rect.top));
@@ -3201,6 +3265,7 @@ fn refresh_content_settings() {
                 state.settings = settings;
                 state.mapped_keys = mapped_keys;
                 state.enabled = true;
+                refresh_exclusion_state(&mut state);
             });
         }
     });
