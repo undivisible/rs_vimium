@@ -12,15 +12,7 @@ const skipVimium = args.has("--skip-vimium");
 const samples = Number(process.env.RS_VIMIUM_BENCH_SAMPLES ?? "8");
 const warmup = Number(process.env.RS_VIMIUM_BENCH_WARMUP ?? "2");
 const linkCount = Number(process.env.RS_VIMIUM_BENCH_LINKS ?? "160");
-const crepusCommand = process.env.CREPUS_BIN ? [process.env.CREPUS_BIN] : [
-  "cargo",
-  "run",
-  "--manifest-path",
-  join(root, "../crepuscularity/Cargo.toml"),
-  "-p",
-  "crepuscularity-cli",
-  "--"
-];
+const crepusBin = process.env.CREPUS_BIN || "crepus";
 const chromeBin = process.env.CHROME_BIN || [
   "/Users/undivisible/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
   "/Users/undivisible/Library/Caches/ms-playwright/chromium-1217/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
@@ -34,7 +26,7 @@ if (!chromeBin) {
 }
 
 if (!skipBuild) {
-  const result = spawnSync(crepusCommand[0], [...crepusCommand.slice(1), "webext", "build", "--app", "."], {
+  const result = spawnSync(crepusBin, ["webext", "build", "--app", "."], {
     cwd: root,
     stdio: "inherit"
   });
@@ -497,7 +489,7 @@ const result = await withServer(async (url) => {
       warmup,
       link_count: linkCount,
       machine: machineInfo(),
-      build_command: `${crepusCommand.join(" ")} webext build --app .`,
+      build_command: `${crepusBin} webext build --app .`,
       release_profile: releaseProfile,
       rs_vimium: JSON.parse(readFileSync(join(rsExtension, "manifest.json"), "utf8")).version,
       vimium: vimium ? vimium.version : null
