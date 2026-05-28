@@ -7,10 +7,13 @@ Keyboard-first browser runtime and web superpowers built in Rust/WASM with [Crep
 ## Build
 
 ```sh
-crepus webext build --app .
+bun run build
 ```
 
 Load `dist/unpacked/` as an unpacked extension in `chrome://extensions`.
+The local build script runs the sibling `../crepuscularity` CLI so rs_vimium uses the current webext builder. Set `CREPUS_BIN=/path/to/crepus` for the benchmark script if you want a different CLI binary.
+For Firefox output, run `bun run crepus -- webext build --app . --browser firefox` and load `dist/firefox/manifest.json` in `about:debugging#/runtime/this-firefox`.
+When `wasm-opt` is installed, the current Crepuscularity webext builder also optimizes `runtime_bg.wasm` on release builds.
 
 The web-extension build uses the workspace release profile:
 

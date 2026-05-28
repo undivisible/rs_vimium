@@ -1,5 +1,7 @@
 use crepuscularity_webext::wasm::{runtime as browser_runtime, storage, tabs, windows};
-use serde_json::{json, Value};
+#[cfg(test)]
+use serde_json::json;
+use serde_json::Value;
 
 use crate::settings::{NewTabDestination, UserSettings};
 
@@ -67,22 +69,21 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
         "previous-tab" => activate_relative_tab(-command_count(_args)).await?,
         "next-tab" => activate_relative_tab(command_count(_args)).await?,
         "visit-previous-tab" => {
-            let storage_data = storage::session()
-                .get_json(json!({"previousTabIds": []}))
+            let ids = storage::session()
+                .get_key::<Vec<i64>>("previousTabIds")
                 .await
-                .map_err(|e| format!("get session: {}", e))?;
-            if let Some(ids) = storage_data.get("previousTabIds").and_then(Value::as_array) {
-                if let Some(id) = ids.first().and_then(Value::as_i64) {
-                    tabs::update(
-                        id,
-                        &tabs::UpdateProperties {
-                            active: Some(true),
-                            ..Default::default()
-                        },
-                    )
-                    .await
-                    .map_err(|e| e.to_string())?;
-                }
+                .map_err(|e| format!("get session: {}", e))?
+                .unwrap_or_default();
+            if let Some(id) = ids.first() {
+                tabs::update(
+                    *id,
+                    &tabs::UpdateProperties {
+                        active: Some(true),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| e.to_string())?;
             }
         }
         "first-tab" => activate_edge_tab(false).await?,
@@ -116,14 +117,10 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
             if let Some(tab) = active_tab().await? {
                 if let Some(id) = tab.id {
                     let session = storage::session();
-                    let stored = session
-                        .get_json(json!({"mutedTabIds": []}))
+                    let mut muted_ids: Vec<i64> = session
+                        .get_key("mutedTabIds")
                         .await
-                        .map_err(|e| format!("get session: {}", e))?;
-                    let mut muted_ids: Vec<i64> = stored
-                        .get("mutedTabIds")
-                        .and_then(Value::as_array)
-                        .map(|a| a.iter().filter_map(Value::as_i64).collect())
+                        .map_err(|e| format!("get session: {}", e))?
                         .unwrap_or_default();
                     let currently_muted = muted_ids.contains(&id);
                     tabs::update(
@@ -141,7 +138,7 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
                         muted_ids.push(id);
                     }
                     session
-                        .set(&json!({"mutedTabIds": muted_ids}))
+                        .set_key("mutedTabIds", &muted_ids)
                         .await
                         .map_err(|e| format!("save muted: {}", e))?;
                 }
@@ -153,7 +150,7 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
                     if let Some(id) = tab.id {
                         if let Some(url) = &tab.url {
                             storage::sync()
-                                .set(&json!({ "lastClosedTabUrl": url }))
+                                .set_key("lastClosedTabUrl", url)
                                 .await
                                 .map_err(|e| format!("save url: {}", e))?;
                         }
@@ -164,20 +161,19 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
         }
         "restore-tab" => {
             let saved = storage::sync()
-                .get_json(json!({"lastClosedTabUrl": ""}))
+                .get_key::<String>("lastClosedTabUrl")
                 .await
-                .map_err(|e| format!("get url: {}", e))?;
-            if let Some(url) = saved.get("lastClosedTabUrl").and_then(Value::as_str) {
-                if !url.is_empty() {
-                    for _ in 0..command_count(_args).min(20) {
-                        tabs::create(&tabs::CreateProperties {
-                            url: Some(url.to_string()),
-                            active: Some(true),
-                            ..Default::default()
-                        })
-                        .await
-                        .map_err(|e| e.to_string())?;
-                    }
+                .map_err(|e| format!("get url: {}", e))?
+                .unwrap_or_default();
+            if !saved.is_empty() {
+                for _ in 0..command_count(_args).min(20) {
+                    tabs::create(&tabs::CreateProperties {
+                        url: Some(saved.clone()),
+                        active: Some(true),
+                        ..Default::default()
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
                 }
             }
         }
@@ -376,7 +372,7 @@ async fn create_tab_index(options: &Value) -> Result<Option<i64>, String> {
 
 async fn load_settings() -> Result<UserSettings, String> {
     let stored = storage::sync()
-        .get_json(json!({"enabled": true}))
+        .get_json(Value::Null)
         .await
         .map_err(|e| format!("get settings: {}", e))?;
     let mut settings = UserSettings::new();

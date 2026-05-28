@@ -514,19 +514,15 @@ pub fn is_search_query(query: &str) -> bool {
 
 async fn vimium_secret() -> Result<String, String> {
     let session = storage::session();
-    let stored = session
-        .get_json(json!({"vimiumSecret": ""}))
+    let mut secret = session
+        .get_key::<String>("vimiumSecret")
         .await
-        .map_err(|e| format!("get session secret: {}", e))?;
-    let mut secret = stored
-        .get("vimiumSecret")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+        .map_err(|e| format!("get session secret: {}", e))?
+        .unwrap_or_default();
     if secret.is_empty() {
         secret = format!("{}:{}", js_sys::Date::now(), js_sys::Math::random());
         session
-            .set(&json!({"vimiumSecret": secret}))
+            .set_key("vimiumSecret", &secret)
             .await
             .map_err(|e| format!("save session secret: {}", e))?;
     }
@@ -565,7 +561,7 @@ async fn create_global_mark_background(msg: &Value) -> Result<(), String> {
         "scrollY": msg.get("scrollY").and_then(Value::as_f64).unwrap_or(0.0),
     });
     storage::local()
-        .set(&json!({global_mark_key(mark_name): mark}))
+        .set_key(&global_mark_key(mark_name), &mark)
         .await
         .map_err(|e| format!("save global mark: {}", e))
 }
@@ -576,11 +572,11 @@ async fn goto_global_mark_background(msg: &Value) -> Result<bool, String> {
         .and_then(Value::as_str)
         .ok_or_else(|| "missing mark name".to_string())?;
     let key = global_mark_key(mark_name);
-    let stored = storage::local()
-        .get_json(json!({key.clone(): null}))
+    let Some(mark) = storage::local()
+        .get_key::<Value>(&key)
         .await
-        .map_err(|e| format!("get global mark: {}", e))?;
-    let Some(mark) = stored.get(&key).filter(|value| !value.is_null()) else {
+        .map_err(|e| format!("get global mark: {}", e))?
+    else {
         return Ok(false);
     };
     let url = mark.get("url").and_then(Value::as_str).unwrap_or("");
@@ -4004,19 +4000,19 @@ fn apply_new_tab_appearance(
             } else {
                 let doc = document.clone();
                 spawn_local(async move {
-                    let stored = storage::local()
-                        .get_json(Value::Null)
+                    let data = storage::local()
+                        .get_key::<String>("newTabBgImageData")
                         .await
                         .unwrap_or_default();
-                    if let Some(data) = stored.get("newTabBgImageData").and_then(Value::as_str) {
-                        if !data.is_empty() {
-                            if let Some(m) = doc.query_selector("main").ok().flatten() {
-                                if let Some(mh) = m.dyn_ref::<HtmlElement>() {
-                                    let _ = mh.style().set_property(
-                                        "background-image",
-                                        &format!("url({})", data),
-                                    );
-                                }
+                    if let Some(data) = data {
+                        if data.is_empty() {
+                            return;
+                        }
+                        if let Some(m) = doc.query_selector("main").ok().flatten() {
+                            if let Some(mh) = m.dyn_ref::<HtmlElement>() {
+                                let _ = mh
+                                    .style()
+                                    .set_property("background-image", &format!("url({})", data));
                             }
                         }
                     }
@@ -4180,9 +4176,7 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
                 let value = input_for_change.checked();
                 let document_for_save = document.clone();
                 spawn_local(async move {
-                    let mut settings = serde_json::Map::new();
-                    settings.insert(key.to_string(), Value::Bool(value));
-                    let _ = storage::sync().set(&Value::Object(settings)).await;
+                    let _ = storage::sync().set_key(key, &value).await;
                     let show_clock = document_for_save
                         .get_element_by_id("show-clock")
                         .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
@@ -4229,7 +4223,7 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
                                 let doc_for_onload = doc_for.clone();
                                 spawn_local(async move {
                                     let _ = storage::local()
-                                        .set(&json!({"newTabBgImageData": data_str}))
+                                        .set_key("newTabBgImageData", &data_str)
                                         .await;
                                     apply_new_tab_appearance(
                                         &doc_for_onload,
@@ -4259,12 +4253,7 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
                     "newTabSearchEngine" => {
                         if let Some(select) = target.dyn_ref::<HtmlSelectElement>() {
                             let val = select.value();
-                            let mut map = serde_json::Map::new();
-                            map.insert(
-                                "newTabSearchEngine".to_string(),
-                                Value::String(val.clone()),
-                            );
-                            let _ = storage::sync().set(&Value::Object(map)).await;
+                            let _ = storage::sync().set_key("newTabSearchEngine", &val).await;
                             if let Some(row) = doc.get_element_by_id("newTabSearchEngineUrlRow") {
                                 set_element_hidden(&row, val != "custom");
                             }
@@ -4272,20 +4261,15 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
                     }
                     "newTabSearchEngineUrl" => {
                         if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
-                            let mut map = serde_json::Map::new();
-                            map.insert(
-                                "newTabSearchEngineUrl".to_string(),
-                                Value::String(input.value()),
-                            );
-                            let _ = storage::sync().set(&Value::Object(map)).await;
+                            let _ = storage::sync()
+                                .set_key("newTabSearchEngineUrl", &input.value())
+                                .await;
                         }
                     }
                     "newTabDarkInput" => {
                         if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
                             let val = input.checked();
-                            let mut map = serde_json::Map::new();
-                            map.insert("newTabDarkInput".to_string(), Value::Bool(val));
-                            let _ = storage::sync().set(&Value::Object(map)).await;
+                            let _ = storage::sync().set_key("newTabDarkInput", &val).await;
                             if let Some(shell) = doc.get_element_by_id("search-shell") {
                                 if val {
                                     let _ = shell.class_list().add_1("dark-input");
@@ -4298,9 +4282,7 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
                     "newTabAccentColor" => {
                         if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
                             let val = input.value();
-                            let mut map = serde_json::Map::new();
-                            map.insert("newTabAccentColor".to_string(), Value::String(val.clone()));
-                            let _ = storage::sync().set(&Value::Object(map)).await;
+                            let _ = storage::sync().set_key("newTabAccentColor", &val).await;
                             if let Some(main_el) = doc.query_selector("main").ok().flatten() {
                                 if let Some(main_html) = main_el.dyn_ref::<web_sys::HtmlElement>() {
                                     if val.is_empty() {
@@ -4315,9 +4297,7 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
                     "newTabBgType" => {
                         if let Some(select) = target.dyn_ref::<HtmlSelectElement>() {
                             let val = select.value();
-                            let mut map = serde_json::Map::new();
-                            map.insert("newTabBgType".to_string(), Value::String(val.clone()));
-                            let _ = storage::sync().set(&Value::Object(map)).await;
+                            let _ = storage::sync().set_key("newTabBgType", &val).await;
                             if let Some(row) = doc.get_element_by_id("newTabBgColorRow") {
                                 set_element_hidden(&row, val != "color");
                             }
@@ -4329,18 +4309,16 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
                     }
                     "newTabBgColor" => {
                         if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
-                            let mut map = serde_json::Map::new();
-                            map.insert("newTabBgColor".to_string(), Value::String(input.value()));
-                            let _ = storage::sync().set(&Value::Object(map)).await;
+                            let _ = storage::sync()
+                                .set_key("newTabBgColor", &input.value())
+                                .await;
                             changed = true;
                         }
                     }
                     "newTabBgImageUrl" => {
                         if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
                             let val = input.value();
-                            let mut map = serde_json::Map::new();
-                            map.insert("newTabBgImageUrl".to_string(), Value::String(val.clone()));
-                            let _ = storage::sync().set(&Value::Object(map)).await;
+                            let _ = storage::sync().set_key("newTabBgImageUrl", &val).await;
                             if let Some(main_el) = doc.query_selector("main").ok().flatten() {
                                 if let Some(main_html) = main_el.dyn_ref::<web_sys::HtmlElement>() {
                                     if val.is_empty() {

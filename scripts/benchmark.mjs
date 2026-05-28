@@ -12,6 +12,15 @@ const skipVimium = args.has("--skip-vimium");
 const samples = Number(process.env.RS_VIMIUM_BENCH_SAMPLES ?? "8");
 const warmup = Number(process.env.RS_VIMIUM_BENCH_WARMUP ?? "2");
 const linkCount = Number(process.env.RS_VIMIUM_BENCH_LINKS ?? "160");
+const crepusCommand = process.env.CREPUS_BIN ? [process.env.CREPUS_BIN] : [
+  "cargo",
+  "run",
+  "--manifest-path",
+  join(root, "../crepuscularity/Cargo.toml"),
+  "-p",
+  "crepuscularity-cli",
+  "--"
+];
 const chromeBin = process.env.CHROME_BIN || [
   "/Users/undivisible/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
   "/Users/undivisible/Library/Caches/ms-playwright/chromium-1217/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
@@ -25,7 +34,7 @@ if (!chromeBin) {
 }
 
 if (!skipBuild) {
-  const result = spawnSync("crepus", ["webext", "build", "--app", "."], {
+  const result = spawnSync(crepusCommand[0], [...crepusCommand.slice(1), "webext", "build", "--app", "."], {
     cwd: root,
     stdio: "inherit"
   });
@@ -475,8 +484,11 @@ const vimium = prepareVimium();
 const result = await withServer(async (url) => {
   console.error("benchmarking rs_vimium browser actions");
   const rsBrowser = await contentBenchmarks(rsExtension, url, rsSelectors);
-  console.error("benchmarking Vimium browser actions");
-  const vimiumBrowser = vimium ? await contentBenchmarks(vimium.path, url, vimiumSelectors) : [];
+  let vimiumBrowser = [];
+  if (vimium) {
+    console.error("benchmarking Vimium browser actions");
+    vimiumBrowser = await contentBenchmarks(vimium.path, url, vimiumSelectors);
+  }
   return {
     metadata: {
       started_at: startedAt,
@@ -485,7 +497,7 @@ const result = await withServer(async (url) => {
       warmup,
       link_count: linkCount,
       machine: machineInfo(),
-      build_command: "crepus webext build --app .",
+      build_command: `${crepusCommand.join(" ")} webext build --app .`,
       release_profile: releaseProfile,
       rs_vimium: JSON.parse(readFileSync(join(rsExtension, "manifest.json"), "utf8")).version,
       vimium: vimium ? vimium.version : null

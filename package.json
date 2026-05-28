@@ -1,7 +1,8 @@
 {
   "scripts": {
     "benchmark": "bun scripts/benchmark.mjs",
-    "build": "crepus webext build --app .",
+    "build": "bun run crepus -- webext build --app .",
+    "crepus": "cargo run --manifest-path ../crepuscularity/Cargo.toml -p crepuscularity-cli --",
     "format": "cargo fmt --check",
     "lint": "cargo clippy --all-targets --all-features -- -D warnings",
     "test": "cargo test"
