@@ -261,107 +261,6 @@ async function findPageTarget(port, urlPrefix) {
   throw new Error("No page target found.");
 }
 
-async function openExtensionPage(port, extensionId, path) {
-  const url = `chrome-extension://${extensionId}/${path}`;
-  await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: "PUT" });
-  await sleep(500);
-  return await findPageTarget(port, url);
-}
-
-function extensionIdFromTargets(targets, extensionPathPart) {
-  const target = targets.find((entry) => entry.url.includes(extensionPathPart) && entry.url.startsWith("chrome-extension://"));
-  if (!target) return null;
-  return new URL(target.url).hostname;
-}
-
-async function runtimeBenchmarks(port) {
-  const targets = await targetList(port);
-  const extensionId = extensionIdFromTargets(targets, "/src/background.js") || extensionIdFromTargets(targets, "/background.html");
-  if (!extensionId) throw new Error("Could not find rs_vimium extension id.");
-  const { socket, cdp } = await connectTarget(await openExtensionPage(port, extensionId, "pages/popup.html"));
-  try {
-    await cdp.send("Runtime.enable");
-    await evaluate(cdp, `
-      globalThis.__rsBenchRuntimePromise ||= (async () => {
-        const module = await import(chrome.runtime.getURL("vendor/runtime.js"));
-        const wasmBytes = await fetch(chrome.runtime.getURL("vendor/runtime_bg.wasm")).then((response) => response.arrayBuffer());
-        await module.default({ module_or_path: wasmBytes });
-        return module;
-      })();
-      true
-    `);
-    const microScript = `
-      (async () => {
-        const module = await globalThis.__rsBenchRuntimePromise;
-        const samples = ${samples};
-        const warmup = ${warmup};
-        const state = { mode: "normal", sequence: "", countText: "", input: "" };
-        const labels = Array.from({ length: 300 }, (_, i) => module.hint_label(i));
-        const calls = [
-          ["runtime_version", () => module.runtime_version()],
-          ["render_popup", () => module.render_popup(null)],
-          ["shortcut_groups_json", () => module.shortcut_groups_json()],
-          ["content_key_j", () => module.content_key(state, "j", false)],
-          ["content_key_f", () => module.content_key(state, "f", false)],
-          ["content_key_vomnibar", () => module.content_key(state, "o", false)],
-          ["content_key_help", () => module.content_key(state, "?", false)],
-          ["render_help_overlay_basic", () => module.render_help_overlay(false)],
-          ["render_help_overlay_advanced", () => module.render_help_overlay(true)],
-          ["command_list", () => module.command_list()],
-          ["hint_label_0", () => module.hint_label(0)],
-          ["hint_label_500", () => module.hint_label(500)],
-          ["update_hint_state", () => module.update_hint_state(labels, "", "a")],
-          ["resolve_navigable_url", () => module.resolve_navigable("example.com")],
-          ["resolve_navigable_search", () => module.resolve_navigable("hello world")],
-          ["key_name_escape", () => module.key_name("Escape")],
-          ["key_name_space", () => module.key_name(" ")],
-          ["is_search_query_url", () => module.is_search_query("example.com")],
-          ["is_search_query_text", () => module.is_search_query("hello world")],
-          ["settings_get", () => module.settings_get()],
-          ["settings_seed", () => module.settings_seed()],
-          ["settings_set", () => module.settings_set({ smoothScroll: false })],
-          ["settings_clear", () => module.settings_clear()],
-          ["query_vomnibar_commands", () => module.query_vomnibar("tab", "commands")],
-          ["handle_background_settings_get", () => module.handle_background_message({ type: "settings:get" })],
-          ["handle_background_query_vomnibar", () => module.handle_background_message({ type: "rs_vimium", command: "query-vomnibar", query: "tab", mode: "commands" })]
-        ];
-        const result = [];
-        for (const [name, fn] of calls) {
-          const values = [];
-          let failures = 0;
-          for (let i = 0; i < warmup; i += 1) {
-            try {
-              await fn();
-            } catch {
-              failures += 1;
-            }
-          }
-          for (let i = 0; i < samples; i += 1) {
-            const start = performance.now();
-            try {
-              await fn();
-              values.push(performance.now() - start);
-            } catch {
-              values.push(null);
-              failures += 1;
-            }
-          }
-          result.push({ name, values, failures });
-        }
-        return result;
-      })()
-    `;
-    const raw = await evaluate(cdp, microScript, 120000);
-    return raw.map((entry) => ({
-      name: entry.name,
-      ...stats(entry.values),
-      failures: entry.failures + entry.values.filter((value) => value == null).length
-    }));
-  } finally {
-    socket.close();
-  }
-}
-
 async function contentBenchmarks(extensionPath, url, selectors) {
   return await withChrome(extensionPath, url, async (port) => {
     const pageTarget = await findPageTarget(port, url);
@@ -436,48 +335,6 @@ async function contentBenchmarks(extensionPath, url, selectors) {
       socket.close();
     }
   });
-}
-
-async function pageBenchmarks(port) {
-  const targets = await targetList(port);
-  const extensionId = extensionIdFromTargets(targets, "/src/background.js") || extensionIdFromTargets(targets, "/background.html");
-  const pageCases = [
-    ["popup_page", "pages/popup.html", "#root"],
-    ["options_page", "pages/options.html", "#saveBtn"],
-    ["new_tab_page", "pages/new-tab.html", "#new-tab-root,.new-tab,.rs-vimium-new-tab,input"]
-  ];
-  const results = [];
-  for (const [name, path, selector] of pageCases) {
-    results.push(await repeat(name, async () => {
-      const target = await openExtensionPage(port, extensionId, path);
-      const { socket, cdp } = await connectTarget(target);
-      try {
-        await cdp.send("Runtime.enable");
-        const value = await evaluate(cdp, `
-          new Promise((resolve) => {
-            const start = performance.now();
-            const done = () => {
-              if (document.readyState === "complete" && document.querySelector(${JSON.stringify(selector)})) {
-                observer.disconnect();
-                resolve(performance.now() - start);
-              }
-            };
-            const observer = new MutationObserver(done);
-            observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
-            done();
-            setTimeout(() => {
-              observer.disconnect();
-              resolve(null);
-            }, 3000);
-          })
-        `, 4000);
-        return value;
-      } finally {
-        socket.close();
-      }
-    }));
-  }
-  return results;
 }
 
 function stripJsonComments(source) {
@@ -565,13 +422,6 @@ const result = await withServer(async (url) => {
   const rsBrowser = await contentBenchmarks(rsExtension, url, rsSelectors);
   console.error("benchmarking Vimium browser actions");
   const vimiumBrowser = vimium ? await contentBenchmarks(vimium.path, url, vimiumSelectors) : [];
-  console.error("benchmarking rs_vimium WASM exports and extension pages");
-  const rsRuntimeAndPages = await withChrome(rsExtension, "about:blank", async (port) => {
-    return {
-      wasm_exports: await runtimeBenchmarks(port),
-      extension_pages: await pageBenchmarks(port)
-    };
-  });
   return {
     metadata: {
       started_at: startedAt,
@@ -585,8 +435,7 @@ const result = await withServer(async (url) => {
       vimium: vimium ? vimium.version : null
     },
     rs_vimium: {
-      browser_actions: rsBrowser,
-      ...rsRuntimeAndPages
+      browser_actions: rsBrowser
     },
     vimium: vimium ? {
       browser_actions: vimiumBrowser

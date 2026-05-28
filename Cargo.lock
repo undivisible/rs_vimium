@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "crepuscularity-webext"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "crepuscularity-core",
  "crepuscularity-web",
