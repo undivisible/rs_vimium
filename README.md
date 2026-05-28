@@ -33,8 +33,12 @@ Latest local run:
 
 | Field | Value |
 | --- | --- |
-| Date | 2026-05-28T00:00:30.727Z |
+| Date | 2026-05-28T00:09:43.261Z |
 | Browser | Chrome for Testing 148.0.7778.96 |
+| Machine | Mac17,9, Apple M5 Pro, arm64 |
+| CPU cores | 15 physical, 15 logical |
+| Memory | 48 GiB |
+| OS | macOS 26.5 (25F71) |
 | Samples | 8 measured, 2 warmup |
 | Page size | 160 links, 160 buttons |
 | rs_vimium | 1.2.2 |
@@ -44,13 +48,11 @@ Browser-action TTA measures from key dispatch to observable scroll or DOM state.
 
 | Action | rs_vimium median | rs_vimium p90 | Vimium median | Vimium p90 |
 | --- | ---: | ---: | ---: | ---: |
-| `j` scroll | 16.3 ms | 16.3 ms | 24.2 ms | 24.6 ms |
-| `f` link hints | 4.5 ms | 4.9 ms | 3.3 ms | 7.1 ms |
-| `o` vomnibar | 0.9 ms | 1.1 ms | not observed | not observed |
-| `?` help | not observed | not observed | not observed | not observed |
-| `/` find | not observed | not observed | not observed | not observed |
-
-The unobserved rows are headless-browser observability gaps, not claims that the feature is missing or slow. The script records them as failures instead of inventing a timing.
+| `j` scroll | 2.5 ms | 4.0 ms | 35.8 ms | 55.0 ms |
+| `f` link hints | 7.8 ms | 14.0 ms | 26.5 ms | 44.5 ms |
+| `o` vomnibar | 2.3 ms | 6.7 ms | 2.8 ms | 4.7 ms |
+| `?` help | 4.8 ms | 5.8 ms | 3.4 ms | 6.1 ms |
+| `/` find | 3.4 ms | 4.7 ms | 2.8 ms | 5.6 ms |
 
 ## Layout
 

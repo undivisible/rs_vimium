@@ -57,6 +57,27 @@ function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
+function commandOutput(command, args = []) {
+  const result = spawnSync(command, args, { encoding: "utf8" });
+  return result.status === 0 ? result.stdout.trim() : null;
+}
+
+function machineInfo() {
+  const memsize = Number(commandOutput("sysctl", ["-n", "hw.memsize"]));
+  const osName = commandOutput("sw_vers", ["-productName"]);
+  const osVersion = commandOutput("sw_vers", ["-productVersion"]);
+  const osBuild = commandOutput("sw_vers", ["-buildVersion"]);
+  return {
+    model: commandOutput("sysctl", ["-n", "hw.model"]),
+    arch: commandOutput("uname", ["-m"]),
+    cpu: commandOutput("sysctl", ["-n", "machdep.cpu.brand_string"]),
+    physical_cpus: Number(commandOutput("sysctl", ["-n", "hw.physicalcpu"])),
+    logical_cpus: Number(commandOutput("sysctl", ["-n", "hw.logicalcpu"])),
+    memory_gib: Number.isFinite(memsize) ? Number((memsize / 1024 / 1024 / 1024).toFixed(1)) : null,
+    os: [osName, osVersion, osBuild ? `(${osBuild})` : null].filter(Boolean).join(" ")
+  };
+}
+
 async function waitForHttp(url, attempts = 100) {
   for (let i = 0; i < attempts; i += 1) {
     try {
@@ -261,6 +282,18 @@ async function findPageTarget(port, urlPrefix) {
   throw new Error("No page target found.");
 }
 
+async function preparePage(cdp, url, suffix) {
+  await cdp.send("Page.navigate", { url: `${url}?sample=${suffix}` });
+  for (let i = 0; i < 100; i += 1) {
+    const ready = await evaluate(cdp, "document.readyState === 'complete'", 2500);
+    if (ready) break;
+    await sleep(50);
+  }
+  await sleep(900);
+  await cdp.send("Page.bringToFront");
+  await evaluate(cdp, "document.body.focus(); true", 2500);
+}
+
 async function contentBenchmarks(extensionPath, url, selectors) {
   return await withChrome(extensionPath, url, async (port) => {
     const pageTarget = await findPageTarget(port, url);
@@ -269,39 +302,61 @@ async function contentBenchmarks(extensionPath, url, selectors) {
       await cdp.send("Runtime.enable");
       await cdp.send("Page.enable");
       await cdp.send("Page.bringToFront");
-      await sleep(1500);
-      await evaluate(cdp, "document.body.focus(); true");
       const mutationAction = async (name, selector, key, options = {}) => {
-        return await repeat(name, async () => {
+        return await repeat(name, async (index, isWarmup) => {
+          await preparePage(cdp, url, `${name}-${isWarmup ? "warmup" : "sample"}-${index}`);
           await evaluate(cdp, `
-            document.querySelectorAll(${JSON.stringify(selector)}).forEach((node) => node.remove());
             document.body.focus();
             globalThis.__rsVimiumBenchPromise = new Promise((resolve) => {
+              const selector = ${JSON.stringify(selector)};
+              const seenRoots = new WeakSet();
+              const roots = [document];
               const start = performance.now();
+              const observeRoot = (root, observer) => {
+                if (seenRoots.has(root)) return;
+                seenRoots.add(root);
+                observer.observe(root, { childList: true, subtree: true, attributes: true });
+              };
+              const findDeep = (root) => {
+                const found = root.querySelector(selector);
+                if (found) return found;
+                for (const element of root.querySelectorAll("*")) {
+                  if (element.shadowRoot) roots.push(element.shadowRoot);
+                }
+                while (roots.length) {
+                  const next = roots.shift();
+                  if (next !== root) {
+                    const deepFound = findDeep(next);
+                    if (deepFound) return deepFound;
+                  }
+                }
+                return null;
+              };
               const done = () => {
-                if (document.querySelector(${JSON.stringify(selector)})) {
+                for (const element of document.querySelectorAll("*")) {
+                  if (element.shadowRoot) observeRoot(element.shadowRoot, observer);
+                }
+                if (findDeep(document)) {
                   observer.disconnect();
                   resolve(performance.now() - start);
                 }
               };
               const observer = new MutationObserver(done);
-              observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+              observeRoot(document.documentElement, observer);
               done();
               setTimeout(() => {
                 observer.disconnect();
                 resolve(null);
-              }, 1200);
+              }, 2500);
             });
             true
           `, 2500);
           await dispatchKey(cdp, key, options);
-          const value = await evaluate(cdp, "globalThis.__rsVimiumBenchPromise", 2500);
-          await dispatchKey(cdp, "Escape", { code: "Escape", vk: 27, text: "" });
-          await sleep(150);
-          return value;
+          return await evaluate(cdp, "globalThis.__rsVimiumBenchPromise", 3500);
         });
       };
-      const scroll = await repeat("scroll_j", async () => {
+      const scroll = await repeat("scroll_j", async (index, isWarmup) => {
+        await preparePage(cdp, url, `scroll_j-${isWarmup ? "warmup" : "sample"}-${index}`);
         await evaluate(cdp, `
           scrollTo(0, 0);
           document.body.focus();
@@ -429,6 +484,7 @@ const result = await withServer(async (url) => {
       samples,
       warmup,
       link_count: linkCount,
+      machine: machineInfo(),
       build_command: "crepus webext build --app .",
       release_profile: releaseProfile,
       rs_vimium: JSON.parse(readFileSync(join(rsExtension, "manifest.json"), "utf8")).version,
