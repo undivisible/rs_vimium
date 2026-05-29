@@ -1,6 +1,60 @@
 use crate::commands::{CommandEntry, KeyMapRegistry, RegistryEntry};
 use serde_json::{json, Value};
 
+pub const MODE_NORMAL: &str = "normal";
+pub const MODE_HINTS: &str = "hints";
+pub const MODE_VISUAL: &str = "visual";
+pub const MODE_INSERT: &str = "insert";
+pub const MODE_MARK: &str = "mark";
+pub const MODE_FIND: &str = "find";
+pub const MODE_VISUAL_LINE: &str = "visual-line";
+
+pub const EFFECT_CLEAR_OVERLAYS: &str = "clear-overlays";
+pub const EFFECT_SCROLL_STEP: &str = "scroll-step";
+pub const EFFECT_SCROLL_TOP: &str = "scroll-top";
+pub const EFFECT_SCROLL_BOTTOM: &str = "scroll-bottom";
+pub const EFFECT_RELOAD: &str = "reload";
+pub const EFFECT_COPY_URL: &str = "copy-url";
+pub const EFFECT_PASS_NEXT_KEY: &str = "pass-next-key";
+pub const EFFECT_HINTS_GENERAL: &str = "hints-general";
+pub const EFFECT_HINTS_QUEUE: &str = "hints-queue";
+pub const EFFECT_HINTS_DOWNLOAD: &str = "hints-download";
+pub const EFFECT_HINTS_INCOGNITO: &str = "hints-incognito";
+pub const EFFECT_HINTS_COPY_URL: &str = "hints-copy-url";
+pub const EFFECT_CREATE_MARK: &str = "create-mark";
+pub const EFFECT_GOTO_MARK: &str = "goto-mark";
+pub const EFFECT_ENTER_VISUAL: &str = "enter-visual";
+pub const EFFECT_INSERT_MODE: &str = "insert-mode";
+pub const EFFECT_HALF_SCROLL: &str = "half-scroll";
+pub const EFFECT_FULL_SCROLL: &str = "full-scroll";
+pub const EFFECT_SCROLL_LEFT: &str = "scroll-left";
+pub const EFFECT_SCROLL_RIGHT: &str = "scroll-right";
+pub const EFFECT_GO_UP: &str = "go-up";
+pub const EFFECT_GO_ROOT: &str = "go-root";
+pub const EFFECT_FOCUS_INPUT: &str = "focus-input";
+pub const EFFECT_HINTS: &str = "hints";
+pub const EFFECT_VOMNIBAR: &str = "vomnibar";
+pub const EFFECT_VOMNIBAR_BOOKMARKS: &str = "vomnibar-bookmarks";
+pub const EFFECT_VOMNIBAR_TABS: &str = "vomnibar-tabs";
+pub const EFFECT_VOMNIBAR_COMMANDS: &str = "vomnibar-commands";
+pub const EFFECT_VOMNIBAR_EDIT_URL: &str = "vomnibar-edit-url";
+pub const EFFECT_FOLLOW_PATTERN: &str = "follow-pattern";
+pub const EFFECT_OPEN_CLIPBOARD: &str = "open-clipboard";
+pub const EFFECT_VIEW_SOURCE: &str = "view-source";
+pub const EFFECT_BACKGROUND: &str = "background";
+pub const EFFECT_VISUAL_MOVE: &str = "visual-move";
+pub const EFFECT_VISUAL_COPY: &str = "visual-copy";
+pub const EFFECT_EXIT_VISUAL: &str = "exit-visual";
+pub const EFFECT_STAY_VISUAL: &str = "stay-visual";
+pub const EFFECT_CYCLE_FRAME: &str = "cycle-frame";
+pub const EFFECT_FOCUS_MAIN_FRAME: &str = "focus-main-frame";
+pub const EFFECT_FIND: &str = "find";
+pub const EFFECT_FIND_NEXT: &str = "find-next";
+pub const EFFECT_FIND_SELECTED: &str = "find-selected";
+pub const EFFECT_HISTORY_BACK: &str = "history-back";
+pub const EFFECT_HISTORY_FORWARD: &str = "history-forward";
+pub const EFFECT_HELP: &str = "help";
+
 #[derive(Debug, Clone, Default)]
 pub struct KeyState {
     pub mode: String,
@@ -12,11 +66,31 @@ pub struct KeyState {
 impl KeyState {
     pub fn new() -> Self {
         KeyState {
-            mode: "normal".to_string(),
+            mode: MODE_NORMAL.to_string(),
             sequence: String::new(),
             count_text: String::new(),
             input: String::new(),
         }
+    }
+
+    pub fn is_insert(&self) -> bool {
+        self.mode == MODE_INSERT
+    }
+
+    pub fn is_hints(&self) -> bool {
+        self.mode == MODE_HINTS
+    }
+
+    pub fn is_visual(&self) -> bool {
+        self.mode == MODE_VISUAL
+    }
+
+    pub fn is_find(&self) -> bool {
+        self.mode == MODE_FIND
+    }
+
+    pub fn is_mark(&self) -> bool {
+        self.mode == MODE_MARK
     }
 }
 
@@ -30,21 +104,21 @@ pub fn handle_key(
 ) -> Value {
     if key == "Esc" {
         return json!({
-            "state": { "mode": "normal", "sequence": "", "countText": "", "input": "" },
-            "effect": { "kind": "clear-overlays" },
+            "state": { "mode": MODE_NORMAL, "sequence": "", "countText": "", "input": "" },
+            "effect": { "kind": EFFECT_CLEAR_OVERLAYS },
             "prevent": false
         });
     }
 
-    if state.mode == "insert" || editable {
+    if state.is_insert() || editable {
         return json!({ "state": state_to_val(state), "effect": null, "prevent": false });
     }
 
-    if state.mode == "hints" {
+    if state.is_hints() {
         return json!({ "state": state_to_val(state), "effect": null, "prevent": false });
     }
 
-    if state.mode == "visual" {
+    if state.is_visual() {
         return handle_visual_key(state, key, registry, user_mappings);
     }
 
@@ -62,7 +136,7 @@ pub fn handle_key(
     {
         count_text.push_str(key);
         return json!({
-            "state": { "mode": "normal", "sequence": "", "countText": count_text, "input": "" },
+            "state": { "mode": MODE_NORMAL, "sequence": "", "countText": count_text, "input": "" },
             "effect": null,
             "prevent": true
         });
@@ -84,7 +158,7 @@ pub fn handle_key(
         })
     } else if is_prefix {
         json!({
-            "state": { "mode": "normal", "sequence": sequence, "countText": count_text, "input": "" },
+            "state": { "mode": MODE_NORMAL, "sequence": sequence, "countText": count_text, "input": "" },
             "effect": null,
             "prevent": true
         })
@@ -101,7 +175,7 @@ pub fn handle_key(
             }
         }
         json!({
-            "state": { "mode": "normal", "sequence": "", "countText": "", "input": "" },
+            "state": { "mode": MODE_NORMAL, "sequence": "", "countText": "", "input": "" },
             "effect": null,
             "prevent": false
         })
@@ -140,9 +214,9 @@ pub fn handle_visual_key(
     if let Some((cmd_name, entry)) = resolved {
         let effect = visual_effect(cmd_name, count, entry);
         let post_mode = match effect.get("kind").and_then(Value::as_str) {
-            Some("exit-visual") | Some("none") | None => "normal",
-            Some("stay-visual") => "visual",
-            _ => "normal",
+            Some("exit-visual") | Some("none") | None => MODE_NORMAL,
+            Some("stay-visual") => MODE_VISUAL,
+            _ => MODE_NORMAL,
         };
         json!({
             "state": { "mode": post_mode, "sequence": "", "countText": "", "input": "" },
@@ -151,13 +225,13 @@ pub fn handle_visual_key(
         })
     } else if is_prefix {
         json!({
-            "state": { "mode": "visual", "sequence": sequence, "countText": count_text, "input": "" },
+            "state": { "mode": MODE_VISUAL, "sequence": sequence, "countText": count_text, "input": "" },
             "effect": null,
             "prevent": true
         })
     } else {
         json!({
-            "state": { "mode": "normal", "sequence": "", "countText": "", "input": "" },
+            "state": { "mode": MODE_NORMAL, "sequence": "", "countText": "", "input": "" },
             "effect": null,
             "prevent": false
         })
@@ -219,100 +293,100 @@ pub fn command_effect(cmd_name: &str, count: i64, entry: Option<&CommandEntry>) 
     let count = if no_repeat { 1 } else { count };
 
     match cmd_name {
-        "scrollDown" => json!({"kind": "scroll-step", "axis": "y", "direction": 1, "count": count}),
-        "scrollUp" => json!({"kind": "scroll-step", "axis": "y", "direction": -1, "count": count}),
-        "scrollToTop" => json!({"kind": "scroll-top", "count": count}),
-        "scrollToBottom" => json!({"kind": "scroll-bottom"}),
-        "scrollPageDown" => json!({"kind": "half-scroll", "direction": 1, "count": count}),
-        "scrollPageUp" => json!({"kind": "half-scroll", "direction": -1, "count": count}),
-        "scrollFullPageDown" => json!({"kind": "full-scroll", "direction": 1, "count": count}),
-        "scrollFullPageUp" => json!({"kind": "full-scroll", "direction": -1, "count": count}),
+        "scrollDown" => json!({"kind": EFFECT_SCROLL_STEP, "axis": "y", "direction": 1, "count": count}),
+        "scrollUp" => json!({"kind": EFFECT_SCROLL_STEP, "axis": "y", "direction": -1, "count": count}),
+        "scrollToTop" => json!({"kind": EFFECT_SCROLL_TOP, "count": count}),
+        "scrollToBottom" => json!({"kind": EFFECT_SCROLL_BOTTOM}),
+        "scrollPageDown" => json!({"kind": EFFECT_HALF_SCROLL, "direction": 1, "count": count}),
+        "scrollPageUp" => json!({"kind": EFFECT_HALF_SCROLL, "direction": -1, "count": count}),
+        "scrollFullPageDown" => json!({"kind": EFFECT_FULL_SCROLL, "direction": 1, "count": count}),
+        "scrollFullPageUp" => json!({"kind": EFFECT_FULL_SCROLL, "direction": -1, "count": count}),
         "scrollLeft" => {
-            json!({"kind": "scroll-step", "axis": "x", "direction": -1, "count": count})
+            json!({"kind": EFFECT_SCROLL_STEP, "axis": "x", "direction": -1, "count": count})
         }
         "scrollRight" => {
-            json!({"kind": "scroll-step", "axis": "x", "direction": 1, "count": count})
+            json!({"kind": EFFECT_SCROLL_STEP, "axis": "x", "direction": 1, "count": count})
         }
-        "scrollToLeft" => json!({"kind": "scroll-left"}),
-        "scrollToRight" => json!({"kind": "scroll-right"}),
+        "scrollToLeft" => json!({"kind": EFFECT_SCROLL_LEFT}),
+        "scrollToRight" => json!({"kind": EFFECT_SCROLL_RIGHT}),
         "reload" => {
             let hard = entry
                 .and_then(|entry| entry.options.get("hard"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
             if bkg {
-                json!({"kind": "background", "command": "reload", "hard": hard})
+                json!({"kind": EFFECT_BACKGROUND, "command": "reload", "hard": hard})
             } else {
-                json!({"kind": "reload", "hard": hard})
+                json!({"kind": EFFECT_RELOAD, "hard": hard})
             }
         }
-        "copyCurrentUrl" => json!({"kind": "copy-url"}),
-        "openCopiedUrlInCurrentTab" => json!({"kind": "open-clipboard", "newTab": false}),
-        "openCopiedUrlInNewTab" => json!({"kind": "open-clipboard", "newTab": true}),
-        "goUp" => json!({"kind": "go-up", "count": count}),
-        "goToRoot" => json!({"kind": "go-root"}),
-        "enterInsertMode" => json!({"kind": "insert-mode"}),
-        "enterVisualMode" => json!({"kind": "enter-visual", "mode": "visual"}),
-        "enterVisualLineMode" => json!({"kind": "enter-visual", "mode": "visual-line"}),
-        "focusInput" => json!({"kind": "focus-input", "count": count}),
+        "copyCurrentUrl" => json!({"kind": EFFECT_COPY_URL}),
+        "openCopiedUrlInCurrentTab" => json!({"kind": EFFECT_OPEN_CLIPBOARD, "newTab": false}),
+        "openCopiedUrlInNewTab" => json!({"kind": EFFECT_OPEN_CLIPBOARD, "newTab": true}),
+        "goUp" => json!({"kind": EFFECT_GO_UP, "count": count}),
+        "goToRoot" => json!({"kind": EFFECT_GO_ROOT}),
+        "enterInsertMode" => json!({"kind": EFFECT_INSERT_MODE}),
+        "enterVisualMode" => json!({"kind": EFFECT_ENTER_VISUAL, "mode": MODE_VISUAL}),
+        "enterVisualLineMode" => json!({"kind": EFFECT_ENTER_VISUAL, "mode": MODE_VISUAL_LINE}),
+        "focusInput" => json!({"kind": EFFECT_FOCUS_INPUT, "count": count}),
         "LinkHints.activateModeToOpenInNewTab" => {
             json!({"kind": "hints", "newTab": true, "foreground": false})
         }
         "LinkHints.activateModeToOpenInNewForegroundTab" => {
             json!({"kind": "hints", "newTab": true, "foreground": true})
         }
-        "LinkHints.activateMode" => json!({"kind": "hints-general"}),
-        "LinkHints.activateModeWithQueue" => json!({"kind": "hints-queue"}),
-        "LinkHints.activateModeToDownloadLink" => json!({"kind": "hints-download"}),
-        "LinkHints.activateModeToOpenIncognito" => json!({"kind": "hints-incognito"}),
-        "LinkHints.activateModeToCopyLinkUrl" => json!({"kind": "hints-copy-url"}),
-        "goPrevious" => json!({"kind": "follow-pattern", "pattern": "previous"}),
-        "goNext" => json!({"kind": "follow-pattern", "pattern": "next"}),
-        "nextFrame" => json!({"kind": "cycle-frame", "direction": 1}),
-        "mainFrame" => json!({"kind": "focus-main-frame"}),
-        "Marks.activateCreateMode" => json!({"kind": "create-mark"}),
-        "Marks.activateGotoMode" => json!({"kind": "goto-mark"}),
+        "LinkHints.activateMode" => json!({"kind": EFFECT_HINTS_GENERAL}),
+        "LinkHints.activateModeWithQueue" => json!({"kind": EFFECT_HINTS_QUEUE}),
+        "LinkHints.activateModeToDownloadLink" => json!({"kind": EFFECT_HINTS_DOWNLOAD}),
+        "LinkHints.activateModeToOpenIncognito" => json!({"kind": EFFECT_HINTS_INCOGNITO}),
+        "LinkHints.activateModeToCopyLinkUrl" => json!({"kind": EFFECT_HINTS_COPY_URL}),
+        "goPrevious" => json!({"kind": EFFECT_FOLLOW_PATTERN, "pattern": "previous"}),
+        "goNext" => json!({"kind": EFFECT_FOLLOW_PATTERN, "pattern": "next"}),
+        "nextFrame" => json!({"kind": EFFECT_CYCLE_FRAME, "direction": 1}),
+        "mainFrame" => json!({"kind": EFFECT_FOCUS_MAIN_FRAME}),
+        "Marks.activateCreateMode" => json!({"kind": EFFECT_CREATE_MARK}),
+        "Marks.activateGotoMode" => json!({"kind": EFFECT_GOTO_MARK}),
         "Vomnibar.activate" => {
-            json!({"kind": "vomnibar", "newTab": false, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
+            json!({"kind": EFFECT_VOMNIBAR, "newTab": false, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
         }
         "Vomnibar.activateInNewTab" => {
-            json!({"kind": "vomnibar", "newTab": true, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
+            json!({"kind": EFFECT_VOMNIBAR, "newTab": true, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
         }
         "Vomnibar.activateBookmarks" => {
-            json!({"kind": "vomnibar-bookmarks", "newTab": false, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
+            json!({"kind": EFFECT_VOMNIBAR_BOOKMARKS, "newTab": false, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
         }
         "Vomnibar.activateBookmarksInNewTab" => {
-            json!({"kind": "vomnibar-bookmarks", "newTab": true, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
+            json!({"kind": EFFECT_VOMNIBAR_BOOKMARKS, "newTab": true, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
         }
-        "Vomnibar.activateTabSelection" => json!({"kind": "vomnibar-tabs"}),
+        "Vomnibar.activateTabSelection" => json!({"kind": EFFECT_VOMNIBAR_TABS}),
         "Vomnibar.activateCommandSelection" => {
-            json!({"kind": "vomnibar-commands"})
+            json!({"kind": EFFECT_VOMNIBAR_COMMANDS})
         }
         "Vomnibar.activateEditUrl" => {
-            json!({"kind": "vomnibar-edit-url", "newTab": false, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
+            json!({"kind": EFFECT_VOMNIBAR_EDIT_URL, "newTab": false, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
         }
         "Vomnibar.activateEditUrlInNewTab" => {
-            json!({"kind": "vomnibar-edit-url", "newTab": true, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
+            json!({"kind": EFFECT_VOMNIBAR_EDIT_URL, "newTab": true, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
         }
-        "enterFindMode" => json!({"kind": "find"}),
-        "performFind" => json!({"kind": "find-next", "reverse": false}),
-        "performBackwardsFind" => json!({"kind": "find-next", "reverse": true}),
-        "findSelected" => json!({"kind": "find-selected", "reverse": false}),
-        "findSelectedBackwards" => json!({"kind": "find-selected", "reverse": true}),
-        "goBack" => json!({"kind": "history-back"}),
-        "goForward" => json!({"kind": "history-forward"}),
+        "enterFindMode" => json!({"kind": EFFECT_FIND}),
+        "performFind" => json!({"kind": EFFECT_FIND_NEXT, "reverse": false}),
+        "performBackwardsFind" => json!({"kind": EFFECT_FIND_NEXT, "reverse": true}),
+        "findSelected" => json!({"kind": EFFECT_FIND_SELECTED, "reverse": false}),
+        "findSelectedBackwards" => json!({"kind": EFFECT_FIND_SELECTED, "reverse": true}),
+        "goBack" => json!({"kind": EFFECT_HISTORY_BACK}),
+        "goForward" => json!({"kind": EFFECT_HISTORY_FORWARD}),
         "createTab" | "previousTab" | "nextTab" | "visitPreviousTab" | "firstTab" | "lastTab"
         | "duplicateTab" | "togglePinTab" | "toggleMuteTab" | "removeTab" | "restoreTab"
         | "moveTabToNewWindow" | "closeTabsOnLeft" | "closeTabsOnRight" | "closeOtherTabs"
         | "moveTabLeft" | "moveTabRight" | "setZoom" | "zoomIn" | "zoomOut" | "zoomReset" => {
-            json!({"kind": "background", "command": background_command_for_registry_name(cmd_name), "count": count, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
+            json!({"kind": EFFECT_BACKGROUND, "command": background_command_for_registry_name(cmd_name), "count": count, "options": entry.map(|entry| entry.options.clone()).unwrap_or_else(|| json!({}))})
         }
-        "passNextKey" => json!({"kind": "pass-next-key"}),
-        "toggleViewSource" => json!({"kind": "view-source"}),
-        "showHelp" => json!({"kind": "help"}),
+        "passNextKey" => json!({"kind": EFFECT_PASS_NEXT_KEY}),
+        "toggleViewSource" => json!({"kind": EFFECT_VIEW_SOURCE}),
+        "showHelp" => json!({"kind": EFFECT_HELP}),
         _ => {
             if bkg {
-                json!({"kind": "background", "command": cmd_name})
+                json!({"kind": EFFECT_BACKGROUND, "command": cmd_name})
             } else {
                 json!({"kind": "none"})
             }
@@ -323,35 +397,35 @@ pub fn command_effect(cmd_name: &str, count: i64, entry: Option<&CommandEntry>) 
 fn visual_effect(cmd_name: &str, _count: i64, _entry: Option<&CommandEntry>) -> Value {
     match cmd_name {
         "j" | "scrollDown" => {
-            json!({"kind": "visual-move", "direction": "forward", "granularity": "line"})
+            json!({"kind": EFFECT_VISUAL_MOVE, "direction": "forward", "granularity": "line"})
         }
         "k" | "scrollUp" => {
-            json!({"kind": "visual-move", "direction": "backward", "granularity": "line"})
+            json!({"kind": EFFECT_VISUAL_MOVE, "direction": "backward", "granularity": "line"})
         }
         "h" | "scrollLeft" => {
-            json!({"kind": "visual-move", "direction": "backward", "granularity": "character"})
+            json!({"kind": EFFECT_VISUAL_MOVE, "direction": "backward", "granularity": "character"})
         }
         "l" | "scrollRight" => {
-            json!({"kind": "visual-move", "direction": "forward", "granularity": "character"})
+            json!({"kind": EFFECT_VISUAL_MOVE, "direction": "forward", "granularity": "character"})
         }
-        "w" => json!({"kind": "visual-move", "direction": "forward", "granularity": "vimword"}),
-        "b" => json!({"kind": "visual-move", "direction": "backward", "granularity": "vimword"}),
-        "e" => json!({"kind": "visual-move", "direction": "forward", "granularity": "vimword-end"}),
+        "w" => json!({"kind": EFFECT_VISUAL_MOVE, "direction": "forward", "granularity": "vimword"}),
+        "b" => json!({"kind": EFFECT_VISUAL_MOVE, "direction": "backward", "granularity": "vimword"}),
+        "e" => json!({"kind": EFFECT_VISUAL_MOVE, "direction": "forward", "granularity": "vimword-end"}),
         "0" => {
-            json!({"kind": "visual-move", "direction": "backward", "granularity": "lineboundary"})
+            json!({"kind": EFFECT_VISUAL_MOVE, "direction": "backward", "granularity": "lineboundary"})
         }
         "$" => {
-            json!({"kind": "visual-move", "direction": "forward", "granularity": "lineboundary"})
+            json!({"kind": EFFECT_VISUAL_MOVE, "direction": "forward", "granularity": "lineboundary"})
         }
         "gg" | "scrollToTop" => {
-            json!({"kind": "visual-move", "direction": "backward", "granularity": "document-boundary"})
+            json!({"kind": EFFECT_VISUAL_MOVE, "direction": "backward", "granularity": "document-boundary"})
         }
         "G" | "scrollToBottom" => {
-            json!({"kind": "visual-move", "direction": "forward", "granularity": "document-boundary"})
+            json!({"kind": EFFECT_VISUAL_MOVE, "direction": "forward", "granularity": "document-boundary"})
         }
-        "y" => json!({"kind": "visual-copy", "stay": "exit-visual"}),
-        "Esc" => json!({"kind": "exit-visual"}),
-        _ => json!({"kind": "stay-visual"}),
+        "y" => json!({"kind": EFFECT_VISUAL_COPY, "stay": EFFECT_EXIT_VISUAL}),
+        "Esc" => json!({"kind": EFFECT_EXIT_VISUAL}),
+        _ => json!({"kind": EFFECT_STAY_VISUAL}),
     }
 }
 
@@ -379,16 +453,15 @@ pub fn root_url(url: &str) -> Option<String> {
 
 pub fn effect_mode(effect: &Value) -> String {
     match effect.get("kind").and_then(Value::as_str).unwrap_or("") {
-        "hints" | "hints-general" | "hints-queue" | "hints-download" | "hints-incognito"
-        | "hints-copy-url" => "hints".to_string(),
-        "create-mark" | "goto-mark" => "normal".to_string(),
-        "enter-visual" => effect
+        EFFECT_SCROLL_STEP | EFFECT_HINTS_GENERAL | EFFECT_HINTS_QUEUE | EFFECT_HINTS_DOWNLOAD | EFFECT_HINTS_INCOGNITO | EFFECT_HINTS_COPY_URL | EFFECT_HINTS => MODE_HINTS.to_string(),
+        EFFECT_CREATE_MARK | EFFECT_GOTO_MARK => MODE_NORMAL.to_string(),
+        EFFECT_ENTER_VISUAL => effect
             .get("mode")
             .and_then(Value::as_str)
-            .unwrap_or("visual")
+            .unwrap_or(MODE_VISUAL_LINE)
             .to_string(),
-        "insert-mode" => "insert".to_string(),
-        _ => "normal".to_string(),
+        EFFECT_INSERT_MODE => MODE_INSERT.to_string(),
+        _ => MODE_NORMAL.to_string(),
     }
 }
 
@@ -448,7 +521,7 @@ mod tests {
         let registry = KeyMapRegistry::from_defaults();
         let mappings = std::collections::HashMap::new();
         let state = KeyState {
-            mode: "normal".to_string(),
+            mode: MODE_NORMAL.to_string(),
             sequence: "g".to_string(),
             count_text: "7".to_string(),
             input: String::new(),

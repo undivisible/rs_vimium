@@ -17,6 +17,9 @@ use serde_json::{json, Value};
 use settings::UserSettings;
 use std::cell::RefCell;
 use std::rc::Rc;
+use key_handler::{
+    MODE_FIND, MODE_HINTS, MODE_MARK, MODE_NORMAL, MODE_VISUAL, MODE_VISUAL_LINE,
+};
 use std::sync::Mutex;
 use wasm_bindgen::prelude::*;
 
@@ -248,7 +251,7 @@ pub fn content_key(state_val: JsValue, key: &str, editable: bool) -> Result<JsVa
         mode: incoming
             .get("mode")
             .and_then(Value::as_str)
-            .unwrap_or("normal")
+            .unwrap_or(MODE_NORMAL)
             .to_string(),
         sequence: incoming
             .get("sequence")
@@ -270,7 +273,9 @@ pub fn content_key(state_val: JsValue, key: &str, editable: bool) -> Result<JsVa
 }
 
 fn content_key_result(state: &key_handler::KeyState, key: &str, editable: bool) -> Value {
-    let mappings = USER_MAPPINGS.lock().unwrap();
+    let mappings = USER_MAPPINGS
+        .lock()
+        .expect("USER_MAPPINGS mutex poisoned - this should never happen in WASM single-threaded context");
     let exclusion_state = current_exclusion_state();
     if !exclusion_state.is_enabled_for_url {
         return json!({
@@ -418,7 +423,9 @@ pub fn update_hint_state(labels: JsValue, current: &str, key: &str) -> Result<Js
 
 #[wasm_bindgen]
 pub fn resolve_navigable(query: &str) -> Result<JsValue, JsValue> {
-    let settings = USER_SETTINGS.lock().unwrap();
+    let settings = USER_SETTINGS
+        .lock()
+        .expect("USER_SETTINGS mutex poisoned - this should never happen in WASM single-threaded context");
     let engines = vomnibar::SearchEngines::from_settings(&settings);
     to_js(vomnibar::resolve_navigable(query, &engines))
 }
@@ -968,8 +975,8 @@ fn clear_hints() {
         let mut state = state.borrow_mut();
         state.hints.clear();
         state.hint_input.clear();
-        if state.key_state.mode == "hints" {
-            state.key_state.mode = "normal".to_string();
+        if state.key_state.is_hints() {
+            state.key_state.mode = MODE_NORMAL.to_string();
         }
     });
 }
@@ -1144,7 +1151,7 @@ fn scroll_to_mark(position: &Value) {
 fn handle_mark_key(key: &str, event: &KeyboardEvent) {
     let mode = CONTENT_STATE.with(|state| state.borrow_mut().mark_mode.take());
     CONTENT_STATE.with(|state| {
-        state.borrow_mut().key_state.mode = "normal".to_string();
+        state.borrow_mut().key_state.mode = MODE_NORMAL.to_string();
     });
     let Some(mode) = mode else {
         return;
@@ -1940,7 +1947,7 @@ fn activate_hints(action: &str) {
     }
     CONTENT_STATE.with(|state| {
         let mut state = state.borrow_mut();
-        state.key_state.mode = "hints".to_string();
+        state.key_state.mode = MODE_HINTS.to_string();
         state.hints = hints;
         state.hint_input.clear();
         state.hint_action = action.to_string();
@@ -2343,7 +2350,7 @@ fn show_find() {
     };
     CONTENT_STATE.with(|state| {
         let mut state = state.borrow_mut();
-        state.key_state.mode = "find".to_string();
+        state.key_state.mode = MODE_FIND.to_string();
         state.find_matches.clear();
         state.find_active_index = 0;
     });
@@ -2391,7 +2398,7 @@ fn show_find() {
                                     .unwrap_or_else(find_query);
                                 let mut state = state.borrow_mut();
                                 state.last_find_query = query;
-                                state.key_state.mode = "normal".to_string();
+                                state.key_state.mode = MODE_NORMAL.to_string();
                             });
                             if let Some(target) = event
                                 .target()
@@ -2402,7 +2409,7 @@ fn show_find() {
                         }
                         "Esc" => {
                             CONTENT_STATE.with(|state| {
-                                state.borrow_mut().key_state.mode = "normal".to_string();
+                                state.borrow_mut().key_state.mode = MODE_NORMAL.to_string();
                             });
                             clear_overlays();
                         }
@@ -2418,15 +2425,10 @@ fn show_find() {
 
 fn handle_find_key(key: &str, event: &KeyboardEvent) {
     match key {
-        "Esc" => {
-            CONTENT_STATE.with(|state| {
-                state.borrow_mut().key_state.mode = "normal".to_string();
-            });
-            clear_overlays();
-        }
         "enter" => {
             CONTENT_STATE.with(|state| {
-                state.borrow_mut().key_state.mode = "normal".to_string();
+                let mut state = state.borrow_mut();
+                state.key_state.mode = MODE_NORMAL.to_string();
             });
             if let Some(target) = event
                 .target()
@@ -2434,6 +2436,13 @@ fn handle_find_key(key: &str, event: &KeyboardEvent) {
             {
                 let _ = target.blur();
             }
+        }
+        "Esc" => {
+            CONTENT_STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                state.key_state.mode = MODE_NORMAL.to_string();
+            });
+            clear_overlays();
         }
         _ => {}
     }
@@ -3091,7 +3100,7 @@ fn apply_content_effect(effect: Value) {
             CONTENT_STATE.with(|state| {
                 let mut state = state.borrow_mut();
                 state.mark_mode = Some(MarkMode::Create);
-                state.key_state.mode = "mark".to_string();
+                state.key_state.mode = MODE_MARK.to_string();
             });
             show_hud("Create mark...");
         }
@@ -3099,7 +3108,7 @@ fn apply_content_effect(effect: Value) {
             CONTENT_STATE.with(|state| {
                 let mut state = state.borrow_mut();
                 state.mark_mode = Some(MarkMode::Goto);
-                state.key_state.mode = "mark".to_string();
+                state.key_state.mode = MODE_MARK.to_string();
             });
             show_hud("Go to mark...");
         }
@@ -3107,10 +3116,10 @@ fn apply_content_effect(effect: Value) {
             let line_mode = effect
                 .get("mode")
                 .and_then(Value::as_str)
-                .is_some_and(|mode| mode == "visual-line");
+                .is_some_and(|mode| mode == MODE_VISUAL_LINE);
             CONTENT_STATE.with(|state| {
                 let mut state = state.borrow_mut();
-                state.key_state.mode = "visual".to_string();
+                state.key_state.mode = MODE_VISUAL.to_string();
                 state.visual_line_mode = line_mode;
             });
             establish_visual_selection(line_mode);
@@ -3179,7 +3188,7 @@ fn handle_content_keydown(event: KeyboardEvent, editable: bool) {
     if pass_next {
         return;
     }
-    let find_mode = CONTENT_STATE.with(|state| state.borrow().key_state.mode == "find");
+    let find_mode = CONTENT_STATE.with(|state| state.borrow().key_state.is_find());
     if find_mode {
         if matches!(key.as_str(), "Esc" | "enter") {
             event.prevent_default();
@@ -3188,7 +3197,7 @@ fn handle_content_keydown(event: KeyboardEvent, editable: bool) {
         }
         return;
     }
-    let hints_mode = CONTENT_STATE.with(|state| state.borrow().key_state.mode == "hints");
+    let hints_mode = CONTENT_STATE.with(|state| state.borrow().key_state.is_hints());
     if hints_mode && key != "Esc" {
         event.prevent_default();
         event.stop_propagation();
@@ -3212,7 +3221,7 @@ fn handle_content_keydown(event: KeyboardEvent, editable: bool) {
             state.key_state.mode = next
                 .get("mode")
                 .and_then(Value::as_str)
-                .unwrap_or("normal")
+                .unwrap_or(MODE_NORMAL)
                 .to_string();
             state.key_state.sequence = next
                 .get("sequence")
