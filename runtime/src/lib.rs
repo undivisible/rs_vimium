@@ -11,15 +11,13 @@ use crepuscularity_webext::wasm::{
     bookmarks as browser_bookmarks, runtime as browser_runtime, storage, tabs, windows,
     EventListenerGuard,
 };
+use key_handler::{MODE_FIND, MODE_HINTS, MODE_MARK, MODE_NORMAL, MODE_VISUAL, MODE_VISUAL_LINE};
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde_json::{json, Value};
 use settings::UserSettings;
 use std::cell::RefCell;
 use std::rc::Rc;
-use key_handler::{
-    MODE_FIND, MODE_HINTS, MODE_MARK, MODE_NORMAL, MODE_VISUAL, MODE_VISUAL_LINE,
-};
 use std::sync::Mutex;
 use wasm_bindgen::prelude::*;
 
@@ -273,9 +271,9 @@ pub fn content_key(state_val: JsValue, key: &str, editable: bool) -> Result<JsVa
 }
 
 fn content_key_result(state: &key_handler::KeyState, key: &str, editable: bool) -> Value {
-    let mappings = USER_MAPPINGS
-        .lock()
-        .expect("USER_MAPPINGS mutex poisoned - this should never happen in WASM single-threaded context");
+    let mappings = USER_MAPPINGS.lock().expect(
+        "USER_MAPPINGS mutex poisoned - this should never happen in WASM single-threaded context",
+    );
     let exclusion_state = current_exclusion_state();
     if !exclusion_state.is_enabled_for_url {
         return json!({
@@ -423,9 +421,9 @@ pub fn update_hint_state(labels: JsValue, current: &str, key: &str) -> Result<Js
 
 #[wasm_bindgen]
 pub fn resolve_navigable(query: &str) -> Result<JsValue, JsValue> {
-    let settings = USER_SETTINGS
-        .lock()
-        .expect("USER_SETTINGS mutex poisoned - this should never happen in WASM single-threaded context");
+    let settings = USER_SETTINGS.lock().expect(
+        "USER_SETTINGS mutex poisoned - this should never happen in WASM single-threaded context",
+    );
     let engines = vomnibar::SearchEngines::from_settings(&settings);
     to_js(vomnibar::resolve_navigable(query, &engines))
 }

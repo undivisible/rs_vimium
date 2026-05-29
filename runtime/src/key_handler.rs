@@ -293,8 +293,12 @@ pub fn command_effect(cmd_name: &str, count: i64, entry: Option<&CommandEntry>) 
     let count = if no_repeat { 1 } else { count };
 
     match cmd_name {
-        "scrollDown" => json!({"kind": EFFECT_SCROLL_STEP, "axis": "y", "direction": 1, "count": count}),
-        "scrollUp" => json!({"kind": EFFECT_SCROLL_STEP, "axis": "y", "direction": -1, "count": count}),
+        "scrollDown" => {
+            json!({"kind": EFFECT_SCROLL_STEP, "axis": "y", "direction": 1, "count": count})
+        }
+        "scrollUp" => {
+            json!({"kind": EFFECT_SCROLL_STEP, "axis": "y", "direction": -1, "count": count})
+        }
         "scrollToTop" => json!({"kind": EFFECT_SCROLL_TOP, "count": count}),
         "scrollToBottom" => json!({"kind": EFFECT_SCROLL_BOTTOM}),
         "scrollPageDown" => json!({"kind": EFFECT_HALF_SCROLL, "direction": 1, "count": count}),
@@ -408,9 +412,15 @@ fn visual_effect(cmd_name: &str, _count: i64, _entry: Option<&CommandEntry>) -> 
         "l" | "scrollRight" => {
             json!({"kind": EFFECT_VISUAL_MOVE, "direction": "forward", "granularity": "character"})
         }
-        "w" => json!({"kind": EFFECT_VISUAL_MOVE, "direction": "forward", "granularity": "vimword"}),
-        "b" => json!({"kind": EFFECT_VISUAL_MOVE, "direction": "backward", "granularity": "vimword"}),
-        "e" => json!({"kind": EFFECT_VISUAL_MOVE, "direction": "forward", "granularity": "vimword-end"}),
+        "w" => {
+            json!({"kind": EFFECT_VISUAL_MOVE, "direction": "forward", "granularity": "vimword"})
+        }
+        "b" => {
+            json!({"kind": EFFECT_VISUAL_MOVE, "direction": "backward", "granularity": "vimword"})
+        }
+        "e" => {
+            json!({"kind": EFFECT_VISUAL_MOVE, "direction": "forward", "granularity": "vimword-end"})
+        }
         "0" => {
             json!({"kind": EFFECT_VISUAL_MOVE, "direction": "backward", "granularity": "lineboundary"})
         }
@@ -453,7 +463,13 @@ pub fn root_url(url: &str) -> Option<String> {
 
 pub fn effect_mode(effect: &Value) -> String {
     match effect.get("kind").and_then(Value::as_str).unwrap_or("") {
-        EFFECT_SCROLL_STEP | EFFECT_HINTS_GENERAL | EFFECT_HINTS_QUEUE | EFFECT_HINTS_DOWNLOAD | EFFECT_HINTS_INCOGNITO | EFFECT_HINTS_COPY_URL | EFFECT_HINTS => MODE_HINTS.to_string(),
+        EFFECT_SCROLL_STEP
+        | EFFECT_HINTS_GENERAL
+        | EFFECT_HINTS_QUEUE
+        | EFFECT_HINTS_DOWNLOAD
+        | EFFECT_HINTS_INCOGNITO
+        | EFFECT_HINTS_COPY_URL
+        | EFFECT_HINTS => MODE_HINTS.to_string(),
         EFFECT_CREATE_MARK | EFFECT_GOTO_MARK => MODE_NORMAL.to_string(),
         EFFECT_ENTER_VISUAL => effect
             .get("mode")
