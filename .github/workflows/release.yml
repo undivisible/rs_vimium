@@ -19,11 +19,21 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Install wasm-bindgen
+        run: cargo install wasm-bindgen-cli --locked --version 0.2.121
+
       - name: Install crepus
         run: cargo install crepuscularity-cli
 
       - name: Build extension
         run: crepus webext build --app .
+
+      - name: Verify runtime assets
+        run: |
+          test -f dist/unpacked/vendor/runtime.js
+          test -f dist/unpacked/vendor/runtime_bg.wasm
+          test -f dist/unpacked/src/background.js
+          test -f dist/unpacked/src/content.js
 
       - name: Create archive
         run: |
