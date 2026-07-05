@@ -1382,6 +1382,147 @@ fn element_is_hidden_by_closed_details(element: &Element) -> bool {
     false
 }
 
+fn element_is_same(a: &Element, b: &Element) -> bool {
+    js_sys::Object::is(a.as_ref(), b.as_ref())
+}
+
+fn element_is_aria_disabled(element: &Element) -> bool {
+    let Some(value) = element.get_attribute("aria-disabled") else {
+        return false;
+    };
+    let value = value.to_lowercase();
+    value.is_empty() || value == "true"
+}
+
+fn element_has_jsaction_click(element: &Element) -> bool {
+    let Some(value) = element.get_attribute("jsaction") else {
+        return false;
+    };
+    for rule in value.split(';') {
+        let rule = rule.trim();
+        if rule.is_empty() {
+            continue;
+        }
+        let colon_parts: Vec<&str> = rule.split(':').collect();
+        if colon_parts.len() > 2 {
+            continue;
+        }
+        let (event, action) = if colon_parts.len() == 1 {
+            ("click", colon_parts[0].trim())
+        } else {
+            (colon_parts[0].trim(), colon_parts[1].trim())
+        };
+        if event != "click" {
+            continue;
+        }
+        let action_parts: Vec<&str> = action.split('.').collect();
+        let namespace = action_parts.first().unwrap_or(&"");
+        let action_name = action_parts.get(1).unwrap_or(&"_");
+        if *namespace != "none" && *action_name != "_" {
+            return true;
+        }
+    }
+    false
+}
+
+fn element_has_button_class(element: &Element) -> bool {
+    let Some(class) = element.get_attribute("class") else {
+        return false;
+    };
+    let class = class.to_lowercase();
+    class.contains("button") || class.contains("btn")
+}
+
+fn element_is_clickable_by_heuristic(element: &Element) -> bool {
+    element_has_jsaction_click(element) || element_has_button_class(element)
+}
+
+fn element_is_possible_false_positive(element: &Element) -> bool {
+    element.tag_name().to_lowercase() == "span" || element_has_button_class(element)
+}
+
+fn element_is_base_clickable(element: &Element) -> bool {
+    let tag = element.tag_name().to_lowercase();
+    match tag.as_str() {
+        "a" => return element.has_attribute("href"),
+        "button" | "textarea" | "select" | "summary" | "details" | "label" | "object" | "embed" => {
+            return true
+        }
+        "input" => {
+            return element
+                .get_attribute("type")
+                .is_none_or(|t| t.to_lowercase() != "hidden");
+        }
+        _ => {}
+    }
+    if element.has_attribute("onclick") {
+        return true;
+    }
+    if let Some(value) = element.get_attribute("contenteditable") {
+        let value = value.to_lowercase();
+        if value.is_empty() || value == "contenteditable" || value == "true" {
+            return true;
+        }
+    }
+    if let Some(role) = element.get_attribute("role") {
+        let role = role.to_lowercase();
+        if matches!(
+            role.as_str(),
+            "button"
+                | "link"
+                | "tab"
+                | "checkbox"
+                | "menuitem"
+                | "menuitemcheckbox"
+                | "menuitemradio"
+                | "radio"
+                | "textbox"
+        ) {
+            return true;
+        }
+    }
+    if let Some(tabindex) = element.get_attribute("tabindex") {
+        if let Ok(n) = tabindex.parse::<i32>() {
+            return n >= 0;
+        }
+    }
+    false
+}
+
+fn filter_false_positive_hints(
+    mut targets: Vec<(Element, RectBounds, bool)>,
+) -> Vec<(Element, RectBounds, bool)> {
+    targets.reverse();
+    let mut filtered: Vec<(Element, RectBounds, bool)> = Vec::with_capacity(targets.len());
+    for (target, rect, is_fp) in targets {
+        let mut skip = false;
+        if is_fp {
+            for (recent, _, _) in filtered.iter().rev().take(6) {
+                let mut ancestor = recent.parent_element();
+                for _ in 0..3 {
+                    if let Some(a) = ancestor {
+                        if element_is_same(&a, &target) {
+                            skip = true;
+                            break;
+                        }
+                        ancestor = a.parent_element();
+                    } else {
+                        break;
+                    }
+                }
+                if skip {
+                    break;
+                }
+            }
+        }
+        if !skip {
+            filtered.push((target, rect, is_fp));
+        }
+    }
+    filtered.reverse();
+    filtered
+}
+
 fn rect_bounds(rect: &web_sys::DomRect) -> RectBounds {
     RectBounds {
         left: rect.left(),
@@ -1893,7 +2034,11 @@ fn activate_hints(action: &str) {
     let Some(document) = doc() else {
         return;
     };
-    let selector = "a[href],button,input:not([type='hidden']),textarea,select,summary,[role='button'],[onclick],[contenteditable='true'],[tabindex]:not([tabindex='-1'])";
+    let selector = "a[href],button,input:not([type='hidden']),textarea,select,summary,details,label,object,embed,\
+        [role='button'],[role='link'],[role='tab'],[role='checkbox'],[role='menuitem'],[role='menuitemcheckbox'],\
+        [role='menuitemradio'],[role='radio'],[role='textbox'],\
+        [onclick],[contenteditable='true'],[tabindex]:not([tabindex='-1']),\
+        [jsaction],[class*='button' i],[class*='btn' i]";
     let Ok(nodes) = document.query_selector_all(selector) else {
         return;
     };
@@ -1902,7 +2047,7 @@ fn activate_hints(action: &str) {
     };
     let scroll_x = win().and_then(|w| w.scroll_x().ok()).unwrap_or(0.0);
     let scroll_y = win().and_then(|w| w.scroll_y().ok()).unwrap_or(0.0);
-    let mut targets = Vec::new();
+    let mut targets: Vec<(Element, RectBounds, bool)> = Vec::new();
     let chars = setting_value(
         "linkHintCharacters",
         Value::String("sadfjklewcmpgh".to_string()),
@@ -1910,29 +2055,46 @@ fn activate_hints(action: &str) {
     .as_str()
     .unwrap_or("sadfjklewcmpgh")
     .to_string();
-    for i in 0..nodes.length().min(600) {
+    for i in 0..nodes.length() {
+        if targets.len() >= 600 {
+            break;
+        }
         let Some(node) = nodes.item(i) else {
             continue;
         };
         let Ok(target) = node.dyn_into::<Element>() else {
             continue;
         };
+        if element_is_aria_disabled(&target) {
+            continue;
+        }
+        let is_base = element_is_base_clickable(&target);
+        let is_heuristic = !is_base && element_is_clickable_by_heuristic(&target);
+        if !is_base && !is_heuristic {
+            continue;
+        }
         let Some(rect) = hint_rect_for_element(&mut hint_scan, &document, &target) else {
             continue;
         };
-        targets.push((target, rect.left, rect.top));
+        let is_fp = if is_base {
+            target.tag_name().to_lowercase() == "span"
+        } else {
+            element_is_possible_false_positive(&target)
+        };
+        targets.push((target, rect, is_fp));
     }
+    targets = filter_false_positive_hints(targets);
     let labels = hint_labels_with_chars(targets.len(), &chars);
     let mut hints = Vec::new();
-    for ((target, left, top), label) in targets.into_iter().zip(labels) {
+    for ((target, rect, _), label) in targets.into_iter().zip(labels) {
         let Ok(marker) = document.create_element("span") else {
             continue;
         };
         marker.set_class_name("vc-hint");
         set_text(&marker, &label);
         if let Some(style) = marker.dyn_ref::<HtmlElement>().map(|el| el.style()) {
-            let _ = style.set_property("left", &format!("{}px", (left + scroll_x).max(2.0)));
-            let _ = style.set_property("top", &format!("{}px", (top + scroll_y).max(2.0)));
+            let _ = style.set_property("left", &format!("{}px", (rect.left + scroll_x).max(2.0)));
+            let _ = style.set_property("top", &format!("{}px", (rect.top + scroll_y).max(2.0)));
         }
         if let Some(root) = document.document_element() {
             append(&root, &marker);
