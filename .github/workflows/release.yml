@@ -26,7 +26,7 @@ jobs:
         run: cargo install crepuscularity-cli
 
       - name: Build extension
-        run: crepus webext build --app .
+        run: crepus webext build --app . --release
 
       - name: Verify runtime assets
         run: |
