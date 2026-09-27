@@ -3807,19 +3807,76 @@ pub fn new_tab_main() {
     spawn_local(async move {
         if let Ok(resp) = settings_get().await {
             let settings = from_js(resp).get("settings").cloned().unwrap_or_default();
-            if !settings
-                .get("useCustomNewTab")
-                .and_then(Value::as_bool)
-                .unwrap_or(true)
-            {
-                if let Ok(url) = js_sys::JSON::parse("\"chrome://newtab\"") {
-                    let _ = win2
-                        .location()
-                        .set_href(&url.as_string().unwrap_or_default());
+            match new_tab_startup_action(&settings) {
+                NewTabStartup::CustomPage => setup_new_tab(&doc2, &win2, &settings),
+                NewTabStartup::Redirect(url) => {
+                    let _ = win2.location().replace(&url);
                 }
-                return;
+                NewTabStartup::BrowserHandoff => hand_off_new_tab(&win2, &settings),
             }
-            setup_new_tab(&doc2, &win2, &settings);
+        }
+    });
+}
+
+/// What the new tab page should do on startup, from the merged settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NewTabStartup {
+    /// Show the rs_vimium new tab page.
+    CustomPage,
+    /// Redirect to the user-configured custom URL.
+    Redirect(String),
+    /// Hand the tab to the browser's default search provider start page.
+    BrowserHandoff,
+}
+
+/// The `useCustomNewTab` popup toggle is a master switch; `newTabDestination`
+/// (options page) picks which page is shown while the master switch is on.
+/// A registered `chrome_url_overrides.newtab` always loads this page first,
+/// so both the toggle-off state and the "browser new tab page" destination are
+/// emulated by handing the tab back to the default search provider.
+fn new_tab_startup_action(settings: &Value) -> NewTabStartup {
+    let custom_enabled = settings
+        .get("useCustomNewTab")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let destination = settings
+        .get("newTabDestination")
+        .and_then(Value::as_str)
+        .unwrap_or("vimiumNewTabPage");
+    if !custom_enabled || destination == "browserNewTabPage" {
+        return NewTabStartup::BrowserHandoff;
+    }
+    if destination == "customUrl" {
+        if let Some(url) = settings
+            .get("newTabCustomUrl")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+        {
+            return NewTabStartup::Redirect(url.to_string());
+        }
+    }
+    NewTabStartup::CustomPage
+}
+
+/// Send this tab to the default search provider's start page via the
+/// background. `chrome://newtab` cannot be navigated to from an extension
+/// page (and would load this override page again anyway). If the handoff
+/// fails, fall back to the configured search engine's start page so the tab
+/// never ends up on a dead blank page.
+fn hand_off_new_tab(window: &Window, settings: &Value) {
+    let fallback = resolve_search_engine_url(settings).replace("%s", "");
+    let window = window.clone();
+    spawn_local(async move {
+        let message = to_js(json!({"type": "rs_vimium", "command": "new-tab-default"}))
+            .unwrap_or(JsValue::NULL);
+        let handed_off = send_runtime_message(message)
+            .await
+            .ok()
+            .and_then(|response| from_js(response).get("ok").and_then(Value::as_bool))
+            .unwrap_or(false);
+        if !handed_off {
+            let _ = window.location().replace(&fallback);
         }
     });
 }
@@ -4873,5 +4930,57 @@ mod tests {
         assert!(cancel_new_tab_bang(&mut active));
         assert!(active.is_none());
         assert!(!cancel_new_tab_bang(&mut active));
+    }
+
+    #[test]
+    fn new_tab_startup_defaults_to_custom_page() {
+        assert_eq!(
+            NewTabStartup::CustomPage,
+            new_tab_startup_action(&json!({}))
+        );
+    }
+
+    #[test]
+    fn new_tab_startup_toggle_off_hands_off_to_browser() {
+        assert_eq!(
+            NewTabStartup::BrowserHandoff,
+            new_tab_startup_action(&json!({"useCustomNewTab": false}))
+        );
+    }
+
+    #[test]
+    fn new_tab_startup_browser_destination_hands_off_regardless_of_toggle() {
+        assert_eq!(
+            NewTabStartup::BrowserHandoff,
+            new_tab_startup_action(&json!({
+                "useCustomNewTab": true,
+                "newTabDestination": "browserNewTabPage"
+            }))
+        );
+        assert_eq!(
+            NewTabStartup::BrowserHandoff,
+            new_tab_startup_action(&json!({
+                "useCustomNewTab": false,
+                "newTabDestination": "vimiumNewTabPage"
+            }))
+        );
+    }
+
+    #[test]
+    fn new_tab_startup_custom_url_redirects_or_falls_back_to_custom_page() {
+        assert_eq!(
+            NewTabStartup::Redirect("https://example.com".to_string()),
+            new_tab_startup_action(&json!({
+                "newTabDestination": "customUrl",
+                "newTabCustomUrl": "https://example.com"
+            }))
+        );
+        assert_eq!(
+            NewTabStartup::CustomPage,
+            new_tab_startup_action(&json!({
+                "newTabDestination": "customUrl",
+                "newTabCustomUrl": "   "
+            }))
+        );
     }
 }

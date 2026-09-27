@@ -1,7 +1,5 @@
-use crepuscularity_webext::wasm::{runtime as browser_runtime, storage, tabs, windows};
-#[cfg(test)]
-use serde_json::json;
-use serde_json::Value;
+use crepuscularity_webext::wasm::{generated, runtime as browser_runtime, storage, tabs, windows};
+use serde_json::{json, Value};
 
 use crate::settings::{NewTabDestination, UserSettings};
 
@@ -52,6 +50,20 @@ pub async fn execute_background_command(command: &str, _args: &Value) -> Result<
                 .await
                 .map_err(|e| e.to_string())?;
             }
+        }
+        "new-tab-default" => {
+            // The new tab override page asks the browser to take the tab to the
+            // default search provider's start page (empty query = start page).
+            // A registered chrome_url_overrides.newtab can never be bypassed,
+            // so this is the closest we can get to the stock new tab page.
+            let query = serde_wasm_bindgen::to_value(&json!({
+                "text": "",
+                "disposition": "CURRENT_TAB"
+            }))
+            .map_err(|e| e.to_string())?;
+            generated::search::call("query", &[query])
+                .await
+                .map_err(|e| e.to_string())?;
         }
         "open-url" => {
             let url = _args
