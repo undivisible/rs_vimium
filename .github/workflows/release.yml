@@ -19,6 +19,9 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Install fontconfig
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev
+
       - name: Install wasm-bindgen
         run: cargo install wasm-bindgen-cli --locked --version 0.2.121
 
