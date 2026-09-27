@@ -2381,7 +2381,11 @@ fn install_vomnibar_input(input: HtmlInputElement, list: Element, mode: String, 
     click_closure.forget();
 }
 
+/// Monotonic counter distinguishing the newest vomnibar query from stale ones.
+static VOMNIBAR_QUERY_SEQ: AtomicUsize = AtomicUsize::new(0);
+
 fn refresh_vomnibar_list(query: String, mode: String, list: Element) {
+    let seq = VOMNIBAR_QUERY_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
     spawn_local(async move {
         let msg = to_js(json!({
             "type": "rs_vimium",
@@ -2393,6 +2397,11 @@ fn refresh_vomnibar_list(query: String, mode: String, list: Element) {
         let Ok(resp) = browser_runtime::send_message_value(msg).await else {
             return;
         };
+        // Background queries resolve out of order; only the newest
+        // keystroke's results may render.
+        if VOMNIBAR_QUERY_SEQ.load(Ordering::Relaxed) != seq {
+            return;
+        }
         let value = from_js(resp);
         let items = value
             .get("items")
