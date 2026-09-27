@@ -8,7 +8,7 @@ use commands::KeyMapRegistry;
 use crepuscularity_core::context::{TemplateContext, TemplateValue};
 use crepuscularity_web::render_component_file_to_html;
 use crepuscularity_webext::wasm::{
-    bookmarks as browser_bookmarks, runtime as browser_runtime, storage, tabs, windows,
+    bookmarks as browser_bookmarks, generated, runtime as browser_runtime, storage, tabs, windows,
     EventListenerGuard,
 };
 use key_handler::{MODE_FIND, MODE_HINTS, MODE_MARK, MODE_NORMAL, MODE_VISUAL, MODE_VISUAL_LINE};
@@ -1783,6 +1783,26 @@ fn find_scrollable_element(start: Element, axis: &str, delta: f64) -> Option<Ele
     root
 }
 
+/// Honor the `smoothScroll` setting for an initiated scroll by flipping the
+/// element's CSS scroll-behavior around the assignment. The behavior is read
+/// when the scroll starts, so resetting it right after keeps the animation
+/// contained to this scroll.
+fn with_smooth_scroll_if_enabled(element: &Element, scroll: impl FnOnce()) {
+    if !setting_bool("smoothScroll", true) {
+        scroll();
+        return;
+    }
+    match element.dyn_ref::<web_sys::HtmlElement>() {
+        Some(html_element) => {
+            let style = html_element.style();
+            let _ = style.set_property("scroll-behavior", "smooth");
+            scroll();
+            let _ = style.remove_property("scroll-behavior");
+        }
+        None => scroll(),
+    }
+}
+
 fn scroll_element_by(axis: &str, amount: f64) {
     let Some(start) = active_scroll_element() else {
         return;
@@ -1792,7 +1812,9 @@ fn scroll_element_by(axis: &str, amount: f64) {
     };
     let (scroll_pos, _, _) = axis_names(axis);
     let before = element_f64(&element, scroll_pos);
-    set_element_f64(&element, scroll_pos, before + amount);
+    with_smooth_scroll_if_enabled(&element, || {
+        set_element_f64(&element, scroll_pos, before + amount);
+    });
     if !visible(&element) {
         CONTENT_STATE.with(|state| {
             state.borrow_mut().activated_element = scrolling_element();
@@ -1810,7 +1832,9 @@ fn scroll_element_to(axis: &str, target: f64) {
     };
     let (scroll_pos, scroll_size, client_size) = axis_names(axis);
     let max = (element_f64(&element, scroll_size) - element_f64(&element, client_size)).max(0.0);
-    set_element_f64(&element, scroll_pos, target.clamp(0.0, max));
+    with_smooth_scroll_if_enabled(&element, || {
+        set_element_f64(&element, scroll_pos, target.clamp(0.0, max));
+    });
 }
 
 fn focus_input(count: i64) {
@@ -3581,6 +3605,53 @@ fn set_status(message: &str, is_error: bool) {
     status.set_class_name(if is_error { "status error" } else { "status" });
 }
 
+/// Render the `exclusionRules` setting (`[{pattern, passKeys}]`) as one
+/// "pattern passKeys" line per rule for the options-page textarea.
+fn exclusion_rules_to_text(rules: &Value) -> String {
+    let mut lines = Vec::new();
+    if let Some(items) = rules.as_array() {
+        for rule in items {
+            let Some(pattern) = rule.get("pattern").and_then(Value::as_str) else {
+                continue;
+            };
+            if pattern.is_empty() {
+                continue;
+            }
+            let pass_keys = rule
+                .get("passKeys")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim();
+            if pass_keys.is_empty() {
+                lines.push(pattern.to_string());
+            } else {
+                lines.push(format!("{pattern} {pass_keys}"));
+            }
+        }
+    }
+    lines.join("\n")
+}
+
+/// Parse the options-page textarea back into an `exclusionRules` array.
+/// Each non-empty line is "pattern [passKeys]".
+fn exclusion_rules_from_text(text: &str) -> Value {
+    Value::Array(
+        text.lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(|line| {
+                let mut parts = line.splitn(2, char::is_whitespace);
+                let pattern = parts.next().unwrap_or_default().trim();
+                let pass_keys = parts.next().unwrap_or_default().trim();
+                json!({
+                    "pattern": pattern,
+                    "passKeys": pass_keys
+                })
+            })
+            .collect(),
+    )
+}
+
 fn render_options(settings: &Value) {
     let Some(document) = doc() else {
         return;
@@ -3608,6 +3679,14 @@ fn render_options(settings: &Value) {
         } else if let Some(textarea) = element.dyn_ref::<HtmlTextAreaElement>() {
             textarea.set_value(settings.get(*key).and_then(Value::as_str).unwrap_or(""));
         }
+    }
+    if let Some(textarea) = document
+        .get_element_by_id("exclusionRules")
+        .and_then(|el| el.dyn_into::<HtmlTextAreaElement>().ok())
+    {
+        textarea.set_value(&exclusion_rules_to_text(
+            settings.get("exclusionRules").unwrap_or(&Value::Null),
+        ));
     }
 }
 
@@ -3638,6 +3717,15 @@ fn collect_options() -> Value {
         } else if let Some(textarea) = element.dyn_ref::<HtmlTextAreaElement>() {
             map.insert((*key).to_string(), json!(textarea.value()));
         }
+    }
+    if let Some(textarea) = document
+        .get_element_by_id("exclusionRules")
+        .and_then(|el| el.dyn_into::<HtmlTextAreaElement>().ok())
+    {
+        map.insert(
+            "exclusionRules".to_string(),
+            exclusion_rules_from_text(&textarea.value()),
+        );
     }
     Value::Object(map)
 }
@@ -3883,10 +3971,48 @@ fn hand_off_new_tab(window: &Window, settings: &Value) {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NewTabBangState {
-    name: &'static str,
-    color: &'static str,
-    url: &'static str,
+    name: String,
+    color: String,
+    url: String,
     query: String,
+}
+
+/// A user-defined search engine exposed as a bang on the new tab page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UserBang {
+    alias: String,
+    name: String,
+    url: String,
+    color: String,
+}
+
+const USER_BANG_COLOR: &str = "#64748b";
+
+/// Convert the user's custom search engines (`searchEngines` setting) into
+/// bangs, e.g. `d: https://duckduckgo.com/?q=%s DuckDuckGo` becomes `!d`.
+fn user_bangs_from_settings(settings: &Value) -> Vec<UserBang> {
+    if !settings
+        .get("newTabCustomBangs")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+    {
+        return Vec::new();
+    }
+    let mut user_settings = UserSettings::new();
+    user_settings.merge(settings.clone());
+    let mut bangs: Vec<UserBang> = user_settings
+        .parse_search_engines()
+        .into_iter()
+        .filter(|(keyword, _)| !keyword.is_empty())
+        .map(|(keyword, (url, name))| UserBang {
+            alias: format!("!{keyword}"),
+            name,
+            url,
+            color: USER_BANG_COLOR.to_string(),
+        })
+        .collect();
+    bangs.sort_by(|a, b| a.alias.cmp(&b.alias));
+    bangs
 }
 
 #[derive(Clone, Copy)]
@@ -4104,7 +4230,7 @@ fn encode_new_tab_query(query: &str) -> String {
         .collect()
 }
 
-fn new_tab_bang_state(query: &str) -> Option<NewTabBangState> {
+fn new_tab_bang_state_with(query: &str, user_bangs: &[UserBang]) -> Option<NewTabBangState> {
     let trimmed = query.trim_start();
     if !trimmed.starts_with('!') {
         return None;
@@ -4114,13 +4240,24 @@ fn new_tab_bang_state(query: &str) -> Option<NewTabBangState> {
         .find_map(|(index, ch)| ch.is_whitespace().then_some(index))?;
     let bang = &trimmed[..bang_end];
     let rest = trimmed[bang_end..].trim_start();
-    NEW_TAB_BANGS
+    if let Some(candidate) = NEW_TAB_BANGS
         .iter()
         .find(|candidate| candidate.aliases.contains(&bang))
+    {
+        return Some(NewTabBangState {
+            name: candidate.name.to_string(),
+            color: candidate.color.to_string(),
+            url: candidate.url.to_string(),
+            query: rest.to_string(),
+        });
+    }
+    user_bangs
+        .iter()
+        .find(|candidate| candidate.alias == bang)
         .map(|candidate| NewTabBangState {
-            name: candidate.name,
-            color: candidate.color,
-            url: candidate.url,
+            name: candidate.name.clone(),
+            color: candidate.color.clone(),
+            url: candidate.url.clone(),
             query: rest.to_string(),
         })
 }
@@ -4129,6 +4266,7 @@ fn new_tab_resolve_url_with_bang(
     query: &str,
     active_bang: Option<&NewTabBangState>,
     search_engine_url: &str,
+    user_bangs: &[UserBang],
 ) -> String {
     let trimmed = query.trim();
     if let Some(bang) = active_bang {
@@ -4137,8 +4275,13 @@ fn new_tab_resolve_url_with_bang(
     if trimmed.is_empty() {
         return search_engine_url.replace("%s", "");
     }
-    if let Some(bang) = new_tab_bang_state(trimmed) {
-        return new_tab_resolve_url_with_bang(&bang.query, Some(&bang), search_engine_url);
+    if let Some(bang) = new_tab_bang_state_with(trimmed, user_bangs) {
+        return new_tab_resolve_url_with_bang(
+            &bang.query,
+            Some(&bang),
+            search_engine_url,
+            user_bangs,
+        );
     }
     if trimmed.starts_with("http://")
         || trimmed.starts_with("https://")
@@ -4190,6 +4333,14 @@ fn set_element_hidden(element: &Element, hidden: bool) {
     } else {
         let _ = element.remove_attribute("hidden");
     }
+}
+
+fn checkbox_value(document: &Document, id: &str, default: bool) -> bool {
+    document
+        .get_element_by_id(id)
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+        .map(|el| el.checked())
+        .unwrap_or(default)
 }
 
 fn update_new_tab_clock(document: &Document) {
@@ -4252,12 +4403,99 @@ fn load_new_tab_bookmarks(document: Document) {
     });
 }
 
-fn apply_new_tab_preferences(document: &Document, show_clock: bool, show_bookmarks: bool) {
+/// Host of an http(s) URL with a leading `www.` stripped, e.g.
+/// `https://www.example.com/a` → `example.com`. Non-http schemes yield None
+/// so internal pages never become tiles.
+fn url_host(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = host.trim_start_matches("www.");
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+/// Most-visited host tiles from raw `chrome.history` items: dedupe by host
+/// (keeping the most-visited URL per host), rank by visit count, take `limit`.
+fn top_hosts_from_history(items: &[Value], limit: usize) -> Vec<(String, String)> {
+    let mut hosts: Vec<(String, String, i64)> = Vec::new();
+    for item in items {
+        let Some(url) = item.get("url").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(host) = url_host(url) else {
+            continue;
+        };
+        let visits = item.get("visitCount").and_then(Value::as_i64).unwrap_or(0);
+        match hosts.iter_mut().find(|(known, _, _)| *known == host) {
+            Some(slot) => {
+                if visits > slot.2 {
+                    *slot = (host, url.to_string(), visits);
+                }
+            }
+            None => hosts.push((host, url.to_string(), visits)),
+        }
+    }
+    hosts.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+    hosts
+        .into_iter()
+        .take(limit)
+        .map(|(host, url, _)| (host, url))
+        .collect()
+}
+
+/// Most visited sites is not a topSites-permission lookup (the capability is
+/// not modelled by crepus yet) but derived from the already-granted history
+/// permission, which is the same underlying signal.
+fn load_new_tab_top_sites(document: Document) {
+    spawn_local(async move {
+        let Some(panel) = document.get_element_by_id("topsites-panel") else {
+            return;
+        };
+        let query =
+            to_js(json!({"text": "", "maxResults": 200, "startTime": 0})).unwrap_or(JsValue::NULL);
+        let Ok(raw) = generated::history::call("search", &[query]).await else {
+            return;
+        };
+        let Value::Array(entries) = from_js(raw) else {
+            return;
+        };
+        panel.set_inner_html("");
+        for (host, url) in top_hosts_from_history(&entries, 8) {
+            let Ok(link) = document.create_element("a") else {
+                continue;
+            };
+            let _ = link.set_attribute("href", &url);
+            let _ = link.set_attribute("class", "topsite");
+            let Ok(host_span) = document.create_element("span") else {
+                continue;
+            };
+            let _ = host_span.set_attribute("class", "topsite-host");
+            host_span.set_text_content(Some(&host));
+            append(&link, &host_span);
+            append(&panel, &link);
+        }
+    });
+}
+
+fn apply_new_tab_preferences(
+    document: &Document,
+    show_clock: bool,
+    show_bookmarks: bool,
+    show_top_sites: bool,
+) {
     if let Some(clock) = document.get_element_by_id("clock-panel") {
         set_element_hidden(&clock, !show_clock);
     }
     if let Some(bookmarks) = document.get_element_by_id("bookmark-strip") {
         set_element_hidden(&bookmarks, !show_bookmarks);
+    }
+    if let Some(top_sites) = document.get_element_by_id("topsites-panel") {
+        set_element_hidden(&top_sites, !show_top_sites);
     }
 }
 
@@ -4355,18 +4593,43 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
     else {
         return;
     };
+    let Some(topsites_input) = document
+        .get_element_by_id("show-topsites")
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+    else {
+        return;
+    };
+    let Some(vomnibar_input) = document
+        .get_element_by_id("vomnibar-on-open")
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+    else {
+        return;
+    };
+    let Some(bangs_input) = document
+        .get_element_by_id("custom-bangs")
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+    else {
+        return;
+    };
 
     install_new_tab_clock(document, window);
     load_new_tab_bookmarks(document.clone());
+    load_new_tab_top_sites(document.clone());
 
     let doc_for_load = document.clone();
     let clock_for_load = clock_input.clone();
     let bookmarks_for_load = bookmarks_input.clone();
+    let topsites_for_load = topsites_input.clone();
+    let vomnibar_for_load = vomnibar_input.clone();
+    let bangs_for_load = bangs_input.clone();
     spawn_local(async move {
         let stored = storage::sync()
             .get_json(json!({
                 "newTabShowClock": false,
                 "newTabShowBookmarks": false,
+                "newTabShowTopSites": true,
+                "openVomnibarOnNewTabPage": false,
+                "newTabCustomBangs": true,
                 "newTabSearchEngine": "duckduckgo",
                 "newTabSearchEngineUrl": "",
                 "newTabDarkInput": false,
@@ -4386,6 +4649,18 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
             .get("newTabShowBookmarks")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let show_top_sites = stored
+            .get("newTabShowTopSites")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let open_vomnibar = stored
+            .get("openVomnibarOnNewTabPage")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let custom_bangs = stored
+            .get("newTabCustomBangs")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         let engine = stored
             .get("newTabSearchEngine")
             .and_then(Value::as_str)
@@ -4423,6 +4698,9 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
 
         clock_for_load.set_checked(show_clock);
         bookmarks_for_load.set_checked(show_bookmarks);
+        topsites_for_load.set_checked(show_top_sites);
+        vomnibar_for_load.set_checked(open_vomnibar);
+        bangs_for_load.set_checked(custom_bangs);
 
         if let Some(el) = doc_for_load
             .get_element_by_id("newTabSearchEngine")
@@ -4477,7 +4755,7 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
             set_element_hidden(&row, bg_type != "image");
         }
 
-        apply_new_tab_preferences(&doc_for_load, show_clock, show_bookmarks);
+        apply_new_tab_preferences(&doc_for_load, show_clock, show_bookmarks, show_top_sites);
         apply_new_tab_appearance(&doc_for_load, dark, &accent, &bg_type, &bg_color, &bg_url);
     });
 
@@ -4489,17 +4767,16 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
                 let document_for_save = document.clone();
                 spawn_local(async move {
                     let _ = storage::sync().set_key(key, &value).await;
-                    let show_clock = document_for_save
-                        .get_element_by_id("show-clock")
-                        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
-                        .map(|el| el.checked())
-                        .unwrap_or(false);
-                    let show_bookmarks = document_for_save
-                        .get_element_by_id("show-bookmarks")
-                        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
-                        .map(|el| el.checked())
-                        .unwrap_or(false);
-                    apply_new_tab_preferences(&document_for_save, show_clock, show_bookmarks);
+                    let show_clock = checkbox_value(&document_for_save, "show-clock", false);
+                    let show_bookmarks =
+                        checkbox_value(&document_for_save, "show-bookmarks", false);
+                    let show_top_sites = checkbox_value(&document_for_save, "show-topsites", true);
+                    apply_new_tab_preferences(
+                        &document_for_save,
+                        show_clock,
+                        show_bookmarks,
+                        show_top_sites,
+                    );
                 });
             }));
         let _ = input.add_event_listener_with_callback("change", closure.as_ref().unchecked_ref());
@@ -4508,6 +4785,9 @@ fn install_new_tab_preferences(document: &Document, window: &Window) {
 
     install_toggle(clock_input, "newTabShowClock", document.clone());
     install_toggle(bookmarks_input, "newTabShowBookmarks", document.clone());
+    install_toggle(topsites_input, "newTabShowTopSites", document.clone());
+    install_toggle(vomnibar_input, "openVomnibarOnNewTabPage", document.clone());
+    install_toggle(bangs_input, "newTabCustomBangs", document.clone());
 
     let doc_for_change = document.clone();
     let change_closure =
@@ -4758,6 +5038,8 @@ fn setup_new_tab(document: &Document, window: &Window, settings: &Value) {
     let _ = input_el.set_attribute("spellcheck", "false");
 
     let active_bang: Rc<RefCell<Option<NewTabBangState>>> = Rc::new(RefCell::new(None));
+    let user_bangs: Rc<Vec<UserBang>> = Rc::new(user_bangs_from_settings(settings));
+    append_user_bangs_to_help_panel(document, &user_bangs);
     let shell = document.get_element_by_id("search-shell");
     let label = document.get_element_by_id("search-label");
     if let (Some(shell), Some(label)) = (shell, label) {
@@ -4765,10 +5047,11 @@ fn setup_new_tab(document: &Document, window: &Window, settings: &Value) {
         let shell_for_input = shell.clone();
         let label_for_input = label.clone();
         let active_for_input = active_bang.clone();
+        let bangs_for_input = user_bangs.clone();
         let closure =
             Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_ev: web_sys::Event| {
                 let value = input_for_input.value();
-                if let Some(next) = new_tab_bang_state(&value) {
+                if let Some(next) = new_tab_bang_state_with(&value, &bangs_for_input) {
                     input_for_input.set_value(&next.query);
                     *active_for_input.borrow_mut() = Some(next);
                 } else if value.trim().is_empty() {
@@ -4809,6 +5092,7 @@ fn setup_new_tab(document: &Document, window: &Window, settings: &Value) {
     let win2 = window.clone();
     let active_for_submit = active_bang.clone();
     let url_cell = search_engine_url_cell.clone();
+    let bangs_for_submit = user_bangs.clone();
     if let Some(form) = input_el.form() {
         let closure =
             Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |ev: web_sys::Event| {
@@ -4816,13 +5100,50 @@ fn setup_new_tab(document: &Document, window: &Window, settings: &Value) {
                 let q = input2.value().trim().to_string();
                 if !q.is_empty() {
                     let active = active_for_submit.borrow();
-                    let url =
-                        new_tab_resolve_url_with_bang(&q, active.as_ref(), &url_cell.borrow());
+                    let url = new_tab_resolve_url_with_bang(
+                        &q,
+                        active.as_ref(),
+                        &url_cell.borrow(),
+                        &bangs_for_submit,
+                    );
                     let _ = win2.location().set_href(&url);
                 }
             }));
         let _ = form.add_event_listener_with_callback("submit", closure.as_ref().unchecked_ref());
         closure.forget();
+    }
+
+    if settings
+        .get("openVomnibarOnNewTabPage")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        show_vomnibar("full", false, String::new());
+    }
+}
+
+/// List the user's custom-engine bangs in the bang help panel.
+fn append_user_bangs_to_help_panel(document: &Document, user_bangs: &[UserBang]) {
+    if user_bangs.is_empty() {
+        return;
+    }
+    let Some(panel) = document.query_selector(".bang-panel").ok().flatten() else {
+        return;
+    };
+    let Some(list) = panel.query_selector("dl").ok().flatten() else {
+        return;
+    };
+    for bang in user_bangs {
+        let Ok(term) = document.create_element("dt") else {
+            return;
+        };
+        term.set_text_content(Some(&bang.alias));
+        let Ok(description) = document.create_element("dd") else {
+            return;
+        };
+        description.set_text_content(Some(&format!("{} (custom)", bang.name)));
+        append(&list, &term);
+        append(&list, &description);
     }
 }
 
@@ -4896,7 +5217,7 @@ mod tests {
 
     #[test]
     fn new_tab_bang_state_strips_keyword_and_keeps_query() {
-        let state = new_tab_bang_state("!yt rust wasm").unwrap();
+        let state = new_tab_bang_state_with("!yt rust wasm", &[]).unwrap();
         assert_eq!("Youtube", state.name);
         assert_eq!("rust wasm", state.query);
         assert_eq!("#ff0033", state.color);
@@ -4904,13 +5225,14 @@ mod tests {
 
     #[test]
     fn new_tab_url_uses_active_bang_service() {
-        let state = new_tab_bang_state("!gh rust wasm").unwrap();
+        let state = new_tab_bang_state_with("!gh rust wasm", &[]).unwrap();
         assert_eq!(
             "https://github.com/search?q=rust%20wasm",
             new_tab_resolve_url_with_bang(
                 &state.query,
                 Some(&state),
-                "https://duckduckgo.com/?q=%s"
+                "https://duckduckgo.com/?q=%s",
+                &[],
             )
         );
     }
@@ -4919,13 +5241,157 @@ mod tests {
     fn new_tab_url_falls_back_for_unknown_bang() {
         assert_eq!(
             "https://duckduckgo.com/?q=%21unknown%20rust",
-            new_tab_resolve_url_with_bang("!unknown rust", None, "https://duckduckgo.com/?q=%s")
+            new_tab_resolve_url_with_bang(
+                "!unknown rust",
+                None,
+                "https://duckduckgo.com/?q=%s",
+                &[]
+            )
         );
     }
 
     #[test]
+    fn user_bangs_parse_from_custom_search_engines() {
+        let settings = json!({
+            "newTabCustomBangs": true,
+            "searchEngines":
+                "d: https://duckduckgo.com/?q=%s DuckDuckGo\nz: https://example.com/?q=%s Example\n"
+        });
+        assert_eq!(
+            vec![
+                UserBang {
+                    alias: "!d".into(),
+                    name: "DuckDuckGo".into(),
+                    url: "https://duckduckgo.com/?q=%s".into(),
+                    color: USER_BANG_COLOR.into()
+                },
+                UserBang {
+                    alias: "!z".into(),
+                    name: "Example".into(),
+                    url: "https://example.com/?q=%s".into(),
+                    color: USER_BANG_COLOR.into()
+                }
+            ],
+            user_bangs_from_settings(&settings)
+        );
+    }
+
+    #[test]
+    fn user_bangs_disabled_by_setting() {
+        let settings = json!({
+            "newTabCustomBangs": false,
+            "searchEngines": "d: https://duckduckgo.com/?q=%s DuckDuckGo\n"
+        });
+        assert!(user_bangs_from_settings(&settings).is_empty());
+    }
+
+    #[test]
+    fn user_bang_resolves_and_static_list_wins() {
+        let bangs = [UserBang {
+            alias: "!d".into(),
+            name: "DuckDuckGo".into(),
+            url: "https://duckduckgo.com/?q=%s".into(),
+            color: USER_BANG_COLOR.into(),
+        }];
+        let state = new_tab_bang_state_with("!d rust wasm", &bangs).unwrap();
+        assert_eq!("DuckDuckGo", state.name);
+        assert_eq!("rust wasm", state.query);
+
+        // Static aliases shadow a user engine reusing the same alias.
+        let shadowed = [UserBang {
+            alias: "!yt".into(),
+            name: "My Youtube".into(),
+            url: "https://example.com/?q=%s".into(),
+            color: USER_BANG_COLOR.into(),
+        }];
+        assert_eq!(
+            "Youtube",
+            new_tab_bang_state_with("!yt cats", &shadowed).unwrap().name
+        );
+    }
+
+    #[test]
+    fn user_bang_url_used_in_resolution() {
+        let bangs = [UserBang {
+            alias: "!d".into(),
+            name: "DuckDuckGo".into(),
+            url: "https://duckduckgo.com/?q=%s".into(),
+            color: USER_BANG_COLOR.into(),
+        }];
+        assert_eq!(
+            "https://duckduckgo.com/?q=rust%20wasm",
+            new_tab_resolve_url_with_bang(
+                "!d rust wasm",
+                None,
+                "https://www.google.com/search?q=%s",
+                &bangs
+            )
+        );
+    }
+
+    #[test]
+    fn exclusion_rules_round_trip_through_text() {
+        let rules = json!([
+            {"pattern": "http*://mail.google.com/*", "passKeys": "jk"},
+            {"pattern": "https://example.org/*", "passKeys": ""}
+        ]);
+        let text = exclusion_rules_to_text(&rules);
+        assert_eq!("http*://mail.google.com/* jk\nhttps://example.org/*", text);
+        assert_eq!(rules, exclusion_rules_from_text(&text));
+    }
+
+    #[test]
+    fn exclusion_rules_text_skips_blank_and_malformed_rules() {
+        assert_eq!(
+            json!([{"pattern": "http*://a.com/*", "passKeys": "x y"}]),
+            exclusion_rules_from_text("\n  \nhttp*://a.com/* x y\n\n")
+        );
+        assert_eq!(
+            json!([{"pattern": "https://a.dev/*", "passKeys": ""}]),
+            exclusion_rules_from_text("https://a.dev/*")
+        );
+        // Stored rules without a usable pattern render as nothing.
+        assert_eq!(
+            "",
+            exclusion_rules_to_text(&json!([{"pattern": 3}, {}, "x"]))
+        );
+    }
+
+    #[test]
+    fn url_host_extracts_and_normalizes() {
+        assert_eq!(
+            Some("example.com".to_string()),
+            url_host("https://www.example.com/a?b#c")
+        );
+        assert_eq!(Some("a.dev".to_string()), url_host("http://a.dev"));
+        assert_eq!(None, url_host("chrome://settings"));
+        assert_eq!(None, url_host("about:blank"));
+        assert_eq!(None, url_host("https://www./path"));
+    }
+
+    #[test]
+    fn top_hosts_dedupe_rank_and_limit() {
+        let items = vec![
+            json!({"url": "https://a.com/x", "visitCount": 3}),
+            json!({"url": "https://www.a.com/y", "visitCount": 5}),
+            json!({"url": "https://b.com/", "visitCount": 9}),
+            json!({"url": "chrome://settings", "visitCount": 50}),
+            json!({"url": "https://c.dev/z", "visitCount": 1}),
+        ];
+        assert_eq!(
+            vec![
+                ("b.com".to_string(), "https://b.com/".to_string()),
+                ("a.com".to_string(), "https://www.a.com/y".to_string()),
+                ("c.dev".to_string(), "https://c.dev/z".to_string()),
+            ],
+            top_hosts_from_history(&items, 8)
+        );
+        assert_eq!(1, top_hosts_from_history(&items, 1).len());
+    }
+
+    #[test]
     fn new_tab_escape_cancels_active_bang_once() {
-        let mut active = new_tab_bang_state("!w rust");
+        let mut active = new_tab_bang_state_with("!w rust", &[]);
         assert!(active.is_some());
         assert!(cancel_new_tab_bang(&mut active));
         assert!(active.is_none());

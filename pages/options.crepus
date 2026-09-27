@@ -69,6 +69,15 @@ main #root options-page
       input #newTabCustomUrl type="text" placeholder="https://..."
   section section
     div section-header
+      "Excluded Sites"
+    p
+      "One rule per line: a URL pattern, then optional pass keys to keep working on that site. Example: http*://mail.google.com/* jk"
+    label
+      span
+        "Exclusion rules:"
+      textarea #exclusionRules rows="6"
+  section section
+    div section-header
       "Miscellaneous"
     div checkbox-row
       label

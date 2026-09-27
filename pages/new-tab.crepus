@@ -8,6 +8,7 @@ main min-h-screen grid place-items-center
         legend #search-label
         input #q autofocus type="search" w-full box-border text-sm font-mono outline-none
     nav #bookmark-strip bookmark-strip hidden aria-label="Bookmarks"
+    nav #topsites-panel topsite-panel hidden aria-label="Most visited"
   div control-cluster
     details settings-menu
       summary aria-label="New tab settings" title="New tab settings"
@@ -24,6 +25,14 @@ main min-h-screen grid place-items-center
           input #show-bookmarks type="checkbox"
           span
             "Show bookmarks"
+        label toggle-row
+          input #show-topsites type="checkbox"
+          span
+            "Show most visited sites"
+        label toggle-row
+          input #vomnibar-on-open type="checkbox"
+          span
+            "Open vomnibar on new tab"
         h2
           "Search"
         label
@@ -42,6 +51,10 @@ main min-h-screen grid place-items-center
               "Startpage"
             option value="custom"
               "Custom URL..."
+        label toggle-row
+          input #custom-bangs type="checkbox"
+          span
+            "Use my custom search engines as bangs"
         label #newTabSearchEngineUrlRow
           span
             "Custom search URL"
@@ -218,7 +231,7 @@ input::placeholder{color:var(--ph)}
 .settings-menu summary,.bang-help summary{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--border);border-radius:50%;background:var(--bg);color:var(--fg);font-size:16px;line-height:1;cursor:pointer;list-style:none;user-select:none}
 .settings-menu summary::-webkit-details-marker,.bang-help summary::-webkit-details-marker{display:none}
 .settings-menu[open] summary,.bang-help[open] summary{background:var(--fg);color:var(--bg)}
-.settings-panel,.bang-panel{position:absolute;left:0;bottom:44px;width:272px;box-sizing:border-box;border:1px solid var(--border);background:var(--panel);padding:14px;box-shadow:0 18px 42px rgba(0,0,0,.18)}
+.settings-panel,.bang-panel{position:absolute;left:0;bottom:44px;width:272px;max-height:calc(100vh - 80px);overflow-y:auto;box-sizing:border-box;border:1px solid var(--border);background:var(--panel);padding:14px;box-shadow:0 18px 42px rgba(0,0,0,.18)}
 .settings-panel h2,.bang-panel h2{margin:0 0 8px;font-size:13px;font-weight:700}
 .bang-panel p{margin:0 0 12px;color:var(--muted);font-size:11px;line-height:1.45}
 .toggle-row{display:flex;align-items:center;gap:9px;margin-top:10px;color:var(--fg);font-size:12px}
@@ -234,4 +247,36 @@ input::placeholder{color:var(--ph)}
 .settings-panel .hidden{display:none!important}
 .settings-panel h2{margin:14px 0 8px;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)}
 .settings-panel h2:first-of-type{margin-top:0}
+/* Statically compiled utilities (unocss runtime engine removed from this page). */
+.grid{display:grid}
+.box-border{box-sizing:border-box}
+.max-w-\[520px\]{max-width:520px}
+.min-h-screen{min-height:100vh}
+.w-full{width:100%}
+.place-items-center{place-items:center}
+.px-4{padding-left:1rem;padding-right:1rem}
+.text-sm{font-size:0.875rem;line-height:1.25rem}
+.font-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+.outline-none{outline:2px solid transparent;outline-offset:2px}
+.topsite-panel{width:min(520px,calc(100vw - 32px));display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px}
+.topsite-panel[hidden]{display:none}
+.topsite-panel a{box-sizing:border-box;display:flex;flex-direction:column;align-items:center;gap:3px;overflow:hidden;border:1px solid var(--border);padding:9px 6px;color:var(--fg);font-size:11px;text-decoration:none;text-align:center}
+.topsite-panel a:hover{background:var(--fg);color:var(--bg)}
+.topsite-panel .topsite-host{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vc-vomnibar{position:fixed;z-index:2147483647;left:0;top:0;width:100%;height:100%;background:rgba(255,255,255,.86);display:flex;align-items:flex-start;justify-content:center;padding-top:16vh;animation:vc-fadein .12s ease}
+.vc-vomnibar-box{width:min(560px,calc(100vw - 32px));background:#fff;border:1px solid #000;overflow:hidden}
+.vc-vomnibar-input-wrap{display:flex;align-items:center;border-bottom:1px solid #000}
+.vc-vomnibar-input{width:100%;box-sizing:border-box;border:0;background:#fff;color:#000;font:500 13px/1.4 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;padding:10px 12px;outline:none}
+.vc-vomnibar-clear{flex:0 0 auto;width:28px;height:28px;border:0;background:transparent;color:#000;font:16px/1 sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin-right:4px;opacity:.5}
+.vc-vomnibar-clear:hover{opacity:1}
+.vc-vomnibar-input::placeholder{color:#666}
+.vc-vomnibar-list{list-style:none;margin:0;padding:0;max-height:320px;overflow:auto}
+.vc-vomnibar-item{display:flex;align-items:center;gap:10px;padding:7px 12px;cursor:pointer;border-bottom:1px solid #e5e5e5}
+.vc-vomnibar-item:hover,.vc-vomnibar-selected{background:#e0e0e0;color:#000}
+.vc-vomnibar-selected .vc-vomnibar-title,.vc-vomnibar-item:hover .vc-vomnibar-title{color:#000}
+.vc-vomnibar-selected .vc-vomnibar-url,.vc-vomnibar-item:hover .vc-vomnibar-url{color:#000}
+.vc-vomnibar-title{font-size:12px;color:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vc-vomnibar-kind{display:inline-block;width:16px;text-align:center;font-size:11px;margin-right:4px;opacity:.6;flex-shrink:0}
+.vc-vomnibar-url{font-size:11px;color:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;opacity:.72}
+@keyframes vc-fadein{from{opacity:0}to{opacity:1}}
 </style>
