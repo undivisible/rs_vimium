@@ -64,6 +64,7 @@ pub fn default_settings() -> Value {
     })
 }
 
+#[derive(Debug, Clone)]
 pub struct UserSettings {
     pub settings: Value,
     pub defaults: Value,

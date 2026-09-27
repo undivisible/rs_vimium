@@ -371,13 +371,10 @@ async fn create_tab_index(options: &Value) -> Result<Option<i64>, String> {
 }
 
 async fn load_settings() -> Result<UserSettings, String> {
-    let stored = storage::sync()
-        .get_json(Value::Null)
-        .await
-        .map_err(|e| format!("get settings: {}", e))?;
-    let mut settings = UserSettings::new();
-    settings.merge(stored);
-    Ok(settings)
+    // Cached snapshot of the merged settings; refreshed by the storage
+    // onChanged listener and seeded on first use, so commands avoid a full
+    // storage.sync read every time.
+    Ok(crate::fresh_user_settings().await)
 }
 
 pub async fn query_current_window() -> Result<Vec<tabs::Tab>, String> {

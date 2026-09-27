@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 use settings::UserSettings;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use wasm_bindgen::prelude::*;
 
@@ -165,6 +166,21 @@ pub async fn settings_get() -> Result<JsValue, JsValue> {
     to_js(json!({"ok": true, "settings": settings}))
 }
 
+/// True once USER_SETTINGS has been merged with stored settings in this
+/// runtime instance. Guards the background settings cache against reading
+/// defaults before the first seed.
+static USER_SETTINGS_READY: AtomicBool = AtomicBool::new(false);
+
+/// Snapshot of the merged settings, seeding from storage on first use. The
+/// background uses this instead of re-reading storage on every command; the
+/// storage.onChanged listener calls settings_seed to keep it current.
+pub(crate) async fn fresh_user_settings() -> UserSettings {
+    if !USER_SETTINGS_READY.load(Ordering::Relaxed) {
+        let _ = settings_seed().await;
+    }
+    USER_SETTINGS.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
 #[wasm_bindgen]
 pub async fn settings_seed() -> Result<JsValue, JsValue> {
     let stored = storage::sync()
@@ -172,7 +188,7 @@ pub async fn settings_seed() -> Result<JsValue, JsValue> {
         .await
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let seeded = if let Ok(mut s) = USER_SETTINGS.lock() {
-        s.merge(stored);
+        s.merge(stored.clone());
         let pruned = settings::prune_defaults(&s.settings);
         let session_metadata = COMMAND_REGISTRY.session_metadata(&s.get_str("keyMappings"));
         if let Ok(mut mappings) = USER_MAPPINGS.lock() {
@@ -183,10 +199,15 @@ pub async fn settings_seed() -> Result<JsValue, JsValue> {
         None
     };
     if let Some((pruned, session_metadata)) = seeded {
-        storage::sync()
-            .set(&pruned)
-            .await
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        USER_SETTINGS_READY.store(true, Ordering::Relaxed);
+        // Skip the write-back when the stored settings are already pruned
+        // (settings_set triggers this on every write; avoid storage churn).
+        if pruned != stored {
+            storage::sync()
+                .set(&pruned)
+                .await
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        }
         storage::session()
             .set(&session_metadata)
             .await
@@ -3769,13 +3790,8 @@ pub fn new_tab_main() {
     let Some(document) = doc() else { return };
     let Some(window) = win() else { return };
 
-    // inject unocss
-    if let Ok(s) = document.create_element("script") {
-        let _ = s.set_attribute("src", "../vendor/unocss.js");
-        if let Some(head) = document.head() {
-            let _ = head.append_child(&s);
-        }
-    }
+    // The page's utility classes are compiled into the template stylesheet, so
+    // unlike the popup this page does not load the unocss runtime engine.
 
     let doc2 = document.clone();
     let win2 = window.clone();
