@@ -5,3 +5,6 @@
 *.html linguist-generated=true
 *.svg linguist-generated=true
 dist/** linguist-generated=true
+
+# Exclude Shell from GitHub language statistics.
+*.sh linguist-detectable=false
