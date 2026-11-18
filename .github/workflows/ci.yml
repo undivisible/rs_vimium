@@ -23,7 +23,7 @@ jobs:
       - name: Checkout crepuscularity
         uses: actions/checkout@v4
         with:
-          repository: tschk/crepuscularity
+          repository: softwarecorporation/crepuscularity
           path: crepuscularity
 
       - name: Install Rust
